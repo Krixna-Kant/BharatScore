@@ -1,82 +1,189 @@
-import { useEffect, useState } from "react";
-import { useAuth, useUser } from "@clerk/clerk-react";
+import React, { useState, useEffect } from "react";
+import { useUser } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
 
-export default function Redirector() {
-  const { isSignedIn } = useAuth();
+const ProfileForm = () => {
   const { user } = useUser();
   const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({
+    name: "",
+    gender: "",
+    state: "",
+    occupation: "",
+  });
+  const [fetching, setFetching] = useState(true);
 
+  // Load existing profile
   useEffect(() => {
-    const handleRedirection = async () => {
-      if (!isSignedIn || !user) {
-        navigate("/sign-in");
-        return;
-      }
-
+    const fetchProfile = async () => {
+      if (!user) return;
       try {
         console.log("Checking user profile for:", user.id);
-
-        const response = await fetch(
+        const res = await fetch(
           `http://127.0.0.1:8000/profile?clerk_user_id=${user.id}`
         );
-
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-
-        const data = await response.json();
+        const data = await res.json();
         console.log("Backend response:", data);
 
-        const hasProfile = data?.has_profile === true;
-
-        if (hasProfile) {
-          console.log("User has profile, redirecting to dashboard");
-          navigate("/dashboard");
-        } else {
-          console.log("User has no profile, redirecting to profile form");
-          navigate("/profile");
+        if (data?.has_profile && data.profile) {
+          setFormData({
+            name: data.profile.name || "",
+            gender: data.profile.gender || "",
+            state: data.profile.state || "",
+            occupation: data.profile.occupation || "",
+          });
         }
-      } catch (error) {
-        console.error("Error checking user profile:", error);
-        setError("Failed to check user profile");
-        navigate("/profile");
+      } catch (err) {
+        console.error("Error fetching profile:", err);
       } finally {
-        setLoading(false);
+        setFetching(false);
       }
     };
 
-    handleRedirection();
-  }, [isSignedIn, user, navigate]);
+    fetchProfile();
+  }, [user]);
 
-  if (loading) {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData((prev) => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) {
+      alert("You must be logged in to submit.");
+      return;
+    }
+    setLoading(true);
+
+    try {
+      const payload = {
+        clerk_user_id: user.id,
+        ...formData,
+      };
+
+      const response = await fetch("http://127.0.0.1:8000/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        alert("Profile saved!");
+        navigate("/dashboard");
+      } else {
+        throw new Error(data.message || "Failed to save profile");
+      }
+    } catch (err) {
+      console.error("Error saving profile:", err);
+      alert("Failed to save profile");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 via-yellow-50 to-orange-100">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-orange-500 mx-auto mb-4"></div>
-          <p className="text-xl text-gray-600">Setting up your account...</p>
-        </div>
+      <div className="max-w-lg mx-auto mt-10 p-6 bg-white shadow-lg rounded-2xl">
+        <p>Please sign in to complete your profile.</p>
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-orange-50 via-yellow-50 to-orange-100">
-        <div className="text-center">
-          <p className="text-xl text-red-600 mb-4">Error: {error}</p>
-          <button
-            onClick={() => navigate("/profile")}
-            className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded-lg"
+  if (fetching) {
+    return <p className="text-center mt-10">Loading profile...</p>;
+  }
+
+  return (
+    <div className="max-w-lg mx-auto mt-10 p-6 bg-white shadow-lg rounded-2xl">
+      <h2 className="text-2xl font-bold mb-4">Edit Your Profile</h2>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Full Name *
+          </label>
+          <input
+            type="text"
+            name="name"
+            value={formData.name}
+            onChange={handleChange}
+            required
+            className="w-full border p-2 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Gender *
+          </label>
+          <select
+            name="gender"
+            value={formData.gender}
+            onChange={handleChange}
+            required
+            className="w-full border p-2 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
           >
-            Continue to Profile
+            <option value="">Select Gender</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            State *
+          </label>
+          <input
+            type="text"
+            name="state"
+            value={formData.state}
+            onChange={handleChange}
+            required
+            placeholder="e.g. Uttar Pradesh"
+            className="w-full border p-2 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Occupation *
+          </label>
+          <input
+            type="text"
+            name="occupation"
+            value={formData.occupation}
+            onChange={handleChange}
+            required
+            placeholder="e.g. Farmer"
+            className="w-full border p-2 rounded focus:ring-2 focus:ring-orange-500 focus:border-orange-500"
+          />
+        </div>
+
+        <div className="flex gap-4">
+          <button
+            type="submit"
+            disabled={loading}
+            className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white py-3 px-4 rounded-lg font-medium transition-colors"
+          >
+            {loading ? "Saving..." : "Save Profile"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate("/dashboard")}
+            className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-800 py-3 px-4 rounded-lg font-medium transition-colors"
+          >
+            Cancel
           </button>
         </div>
-      </div>
-    );
-  }
+      </form>
+    </div>
+  );
+};
 
-  return null;
-}
+export default ProfileForm;
