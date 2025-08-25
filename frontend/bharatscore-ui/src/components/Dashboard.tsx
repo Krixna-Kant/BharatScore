@@ -82,7 +82,6 @@ const Dashboard = () => {
         <UserButton afterSignOutUrl="/" />
       </div>
 
-      {/* Profile Section */}
       <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
         <h2 className="text-xl font-semibold mb-2">Your Profile</h2>
         {loadingProfile ? (
@@ -105,9 +104,23 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* Applications Section */}
       <div>
-        <h2 className="text-xl font-semibold mb-4">Your Applications</h2>
+        <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">Your Applications</h2>
+            <button
+            onClick={() => navigate("/apply")}
+            className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition"
+            >
+                Apply
+            </button>
+        </div>
+        
+        {/* <h2 className="text-xl font-semibold mb-4">Your Applications</h2>
+        <button
+      onClick={() => navigate("/apply")}
+      className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">
+        Apply
+        </button> */}
         {loadingApps ? (
           <p>Loading your applications...</p>
         ) : applications.length === 0 ? (

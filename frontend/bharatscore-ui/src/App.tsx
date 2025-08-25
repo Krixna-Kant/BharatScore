@@ -5,6 +5,7 @@ import SignInPage from "./components/SignInPage";
 import ProfileForm from "./components/ProfileForm"; 
 import Dashboard from "./components/Dashboard"; 
 import Redirector from "./components/Redirector";
+import ApplyForm from "./components/ApplyForm";
 import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/clerk-react";
 
 function App() {
@@ -45,6 +46,8 @@ function App() {
           </SignedOut>
         }
       />
+      <Route path="/apply" element={<SignedIn><ApplyForm /></SignedIn>} />
+
     </Routes>
   );
 }
