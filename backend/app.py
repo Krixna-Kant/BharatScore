@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime
 import os
@@ -8,6 +9,7 @@ import pandas as pd
 import shap
 
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -26,7 +28,55 @@ print("Pipeline steps:", list(model_pipeline.named_steps.keys()))
 
 app = FastAPI(title="Bharat Score API", description="API for Bharat Score Prediction", version="1.0")
 
+#CORS for Frontend
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+#For Profile
+class ProfileRequest(BaseModel):
+    clerk_user_id: str
+    name: str
+    gender: str
+    state: str
+    occupation: str
+
+@app.post("/profile")
+def create_or_update_profile(req: ProfileRequest):
+    """Create or update a basic user profile"""
+    doc = {
+        "clerk_user_id": req.clerk_user_id,
+        "profile": {
+            "name": req.name,
+            "gender": req.gender,
+            "state": req.state,
+            "occupation": req.occupation,
+        },
+        "has_profile": True,
+        "profile_updated_at": datetime.utcnow(),
+    }
+    users_coll.update_one(
+        {"clerk_user_id": req.clerk_user_id},
+        {"$set": doc},
+        upsert=True
+    )
+    return {"status": "stored", "clerk_user_id": req.clerk_user_id}
+
+@app.get("/profile")
+def get_profile(clerk_user_id: str):
+    """Return profile for a given clerk_user_id"""
+    proj = {"_id": 0, "profile": 1, "has_profile": 1, "clerk_user_id": 1}
+    user = users_coll.find_one({"clerk_user_id": clerk_user_id}, proj)
+    if user and user.get("profile"):
+        return {"profile": user["profile"], "has_profile": True}
+    return {"profile": None, "has_profile": False}
+
 class OnboardRequest(BaseModel):
+    clerk_user_id: str
     user_type: str
     region: str
     sms_count: float
@@ -38,7 +88,7 @@ class OnboardRequest(BaseModel):
     coop_score: float
     land_verified: int
     age_group: str
-    device_id: str
+    # device_id: str
     consent: bool = True
 
 class InputData(BaseModel):
@@ -67,12 +117,13 @@ def onboard(req: OnboardRequest):
         req.bill_on_time_ratio = 0.0 
     
     doc = {
+        "clerk_user_id": req.clerk_user_id,
         "raw": req.dict(),
         "created": datetime.utcnow(),
         "status": "received"
     }
     inserted_id = users_coll.insert_one(doc).inserted_id
-    return {"user_id": str(inserted_id), "status": "stored"}
+    return {"mongo_id": str(inserted_id), "clerk_user_id": req.clerk_user_id, "status": "stored"}
 
 @app.post("/predict")
 def predict(data: InputData):
@@ -134,10 +185,14 @@ def get_user(user_id: str):
         return {"error": f"Invalid user ID: {str(e)}"}
     
 @app.get("/users")
-def get_all_users():
-    """Get all users with pagination"""
+def get_all_users(clerk_user_id: str = None):
+    """Get all users with Filter by Clerk User ID (that's because as of now we will fetch users from their Clerk ID)"""
     try:
-        users = list(users_coll.find().limit(50))
+        query = {}
+        if clerk_user_id:
+            query["raw.clerk_user_id"] = clerk_user_id
+        
+        users = list(users_coll.find(query).limit(100))
         for user in users:
             user["_id"] = str(user["_id"])
         return {"users": users, "count": len(users)}
