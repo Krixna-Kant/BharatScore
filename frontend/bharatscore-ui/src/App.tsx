@@ -6,6 +6,8 @@ import ProfileForm from "./components/ProfileForm";
 import Dashboard from "./components/Dashboard"; 
 import Redirector from "./components/Redirector";
 import ApplyForm from "./components/ApplyForm";
+import BehavioralPsychometricTest from "./components/psychometricTest";
+
 import { SignedIn, SignedOut, RedirectToSignIn } from "@clerk/clerk-react";
 
 function App() {
@@ -36,6 +38,23 @@ function App() {
           </SignedIn>
         }
       />
+      <Route
+        path="/apply"
+        element={
+          <SignedIn>
+            <ApplyForm />
+          </SignedIn>
+        }
+      />
+      <Route
+        path="/psychometric-test"
+        element={
+          <SignedIn>
+            
+            <BehavioralPsychometricTest/>
+          </SignedIn>
+        }
+      />
 
       {/* Redirect if not logged in */}
       <Route
@@ -46,7 +65,6 @@ function App() {
           </SignedOut>
         }
       />
-      <Route path="/apply" element={<SignedIn><ApplyForm /></SignedIn>} />
 
     </Routes>
   );

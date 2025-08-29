@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useUser, useClerk, UserButton } from "@clerk/clerk-react";
+import { useUser, UserButton } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
 
 interface Prediction {
@@ -23,7 +23,6 @@ interface Profile {
 
 const Dashboard = () => {
   const { user } = useUser();
-  const { signOut } = useClerk();
   const navigate = useNavigate();
 
   const [applications, setApplications] = useState<Application[]>([]);
@@ -73,89 +72,114 @@ const Dashboard = () => {
     fetchApps();
   }, [user]);
 
-  return (
-    <div className="max-w-5xl mx-auto mt-10 p-6 bg-white shadow-lg rounded-2xl">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        {/* Clerk's built-in signout button */}
-        <UserButton afterSignOutUrl="/" />
-      </div>
+  // Helper component to display loading state
+  const LoadingState = ({ message }: { message: string }) => (
+    <div className="flex items-center justify-center p-8 text-gray-600">
+      <p>{message}</p>
+    </div>
+  );
 
-      <div className="mb-8 p-4 border rounded-lg shadow-sm bg-gray-50">
-        <h2 className="text-xl font-semibold mb-2">Your Profile</h2>
-        {loadingProfile ? (
-          <p>Loading profile...</p>
-        ) : profile ? (
-          <div className="space-y-1">
-            <p><span className="font-medium">Name:</span> {profile.name}</p>
-            <p><span className="font-medium">Gender:</span> {profile.gender}</p>
-            <p><span className="font-medium">State:</span> {profile.state}</p>
-            <p><span className="font-medium">Occupation:</span> {profile.occupation}</p>
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-orange-100 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex justify-between items-center mb-10">
+          <h1 className="text-4xl font-extrabold text-gray-900">Dashboard</h1>
+          <div className="flex items-center space-x-4">
+            <UserButton afterSignOutUrl="/" />
+          </div>
+        </div>
+
+        {/* Profile Card */}
+        <div className="bg-white bg-opacity-95 shadow-2xl rounded-3xl p-8 sm:p-10 border-4 border-white mb-10">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-3xl font-bold text-gray-900">Your Profile</h2>
             <button
               onClick={() => navigate("/profile")}
-              className="mt-3 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg"
+              className="bg-orange-500 hover:bg-orange-600 text-white px-6 py-2 rounded-full font-semibold transition-colors shadow"
             >
               Edit Profile
             </button>
           </div>
-        ) : (
-          <p>No profile found. <button onClick={() => navigate("/profile")} className="text-orange-600 underline">Create Profile</button></p>
-        )}
-      </div>
-
-      <div>
-        <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-semibold">Your Applications</h2>
-            <button
-            onClick={() => navigate("/apply")}
-            className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700 transition"
-            >
-                Apply
-            </button>
+          {loadingProfile ? (
+            <LoadingState message="Loading profile details..." />
+          ) : profile ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-lg text-gray-700">
+              <p><span className="font-semibold text-gray-900">Name:</span> {profile.name}</p>
+              <p><span className="font-semibold text-gray-900">Gender:</span> {profile.gender}</p>
+              <p><span className="font-semibold text-gray-900">State:</span> {profile.state}</p>
+              <p><span className="font-semibold text-gray-900">Occupation:</span> {profile.occupation}</p>
+            </div>
+          ) : (
+            <div className="text-center text-lg text-gray-600">
+              <p className="mb-4">No profile found. Please create one to continue.</p>
+              <button
+                onClick={() => navigate("/profile")}
+                className="text-orange-600 underline font-semibold"
+              >
+                Create Profile
+              </button>
+            </div>
+          )}
         </div>
-        
-        {/* <h2 className="text-xl font-semibold mb-4">Your Applications</h2>
-        <button
-      onClick={() => navigate("/apply")}
-      className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">
-        Apply
-        </button> */}
-        {loadingApps ? (
-          <p>Loading your applications...</p>
-        ) : applications.length === 0 ? (
-          <p>No applications found.</p>
-        ) : (
-          <ul className="space-y-4">
-            {applications.map((app, idx) => (
-              <li key={idx} className="p-4 border rounded-lg shadow-sm">
-                <p>
-                  <span className="font-semibold">Submitted At:</span>{" "}
-                  {new Date(app.created).toLocaleString()}
-                </p>
-                <p>
-                  <span className="font-semibold">Status:</span> {app.status}
-                </p>
-                {app.prediction && (
-                  <>
+
+        {/* Applications Section */}
+        <div className="bg-white bg-opacity-95 shadow-2xl rounded-3xl p-8 sm:p-10 border-4 border-white">
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-3xl font-bold text-gray-900">Your Applications</h2>
+            <div className="flex space-x-4">
+                <button
+                onClick={() => navigate("/apply")}
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-full font-semibold transition-colors shadow"
+                >
+                Apply Now
+                </button>
+                <button
+                onClick={() => navigate("/psychometric-test")}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-full font-semibold transition-colors shadow"
+                >
+                Take Psychometric Test
+                </button>
+            </div>
+          </div>
+
+          {loadingApps ? (
+            <LoadingState message="Loading your applications..." />
+          ) : applications.length === 0 ? (
+            <div className="text-center text-lg text-gray-600">
+              <p>You have not submitted any applications yet.</p>
+            </div>
+          ) : (
+            <ul className="space-y-6">
+              {applications.map((app, idx) => (
+                <li key={idx} className="bg-orange-50 p-6 rounded-2xl shadow-md border-2 border-orange-200">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-base text-gray-800">
                     <p>
-                      <span className="font-semibold">Risk Tier:</span>{" "}
-                      {app.prediction.risk_tier}
+                      <span className="font-semibold text-gray-900">Application Date:</span>{" "}
+                      {new Date(app.created).toLocaleString()}
                     </p>
                     <p>
-                      <span className="font-semibold">PD:</span>{" "}
-                      {app.prediction.pd}
+                      <span className="font-semibold text-gray-900">Status:</span>{" "}
+                      <span className="font-bold text-green-700">{app.status}</span>
                     </p>
-                    <p>
-                      <span className="font-semibold">Prediction:</span>{" "}
-                      {app.prediction.prediction}
-                    </p>
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
+                    {app.prediction && (
+                      <>
+                        <p>
+                          <span className="font-semibold text-gray-900">Risk Tier:</span>{" "}
+                          <span className="font-bold text-orange-700">{app.prediction.risk_tier}</span>
+                        </p>
+                        <p>
+                          <span className="font-semibold text-gray-900">Bharat Score:</span>{" "}
+                          <span className="font-bold">{Math.round(app.prediction.pd * 1000)}</span>
+                        </p>
+                      </>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );
