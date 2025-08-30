@@ -14,6 +14,7 @@ import Dashboard from "./components/Dashboard";
 import Redirector from "./components/Redirector";
 import ApplyForm from "./components/ApplyForm";
 import BehavioralPsychometricTest from "./components/psychometricTest";
+import AadhaarVerification from "./components/AdharVerification";
 
 // New page imports from the template.
 // NOTE: You will need to create or import these files if they don't exist.
@@ -95,6 +96,14 @@ function App() {
             element={
               <SignedIn>
                 <AdminDashboard />
+              </SignedIn>
+            }
+          />
+          <Route
+            path="/adhar"
+            element={
+              <SignedIn>
+                <AadhaarVerification/>
               </SignedIn>
             }
           />
