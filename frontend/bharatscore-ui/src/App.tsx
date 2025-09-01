@@ -15,11 +15,13 @@ import Redirector from "./components/Redirector";
 import ApplyForm from "./components/ApplyForm";
 import BehavioralPsychometricTest from "./components/psychometricTest";
 
-// New page imports from the template.
-// NOTE: You will need to create or import these files if they don't exist.
+// Admin components
+import AdminLogin from "./components/AdminLogin";
+import AdminDashboard from "./components/AdminDashboard";
+
+// Other pages
 import Applications from "./components/Applications";
 import Support from "./components/Support";
-import AdminDashboard from "./components/AdminDashboard";
 import NotFound from "./components/NotFound";
 
 const queryClient = new QueryClient();
@@ -28,10 +30,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        {/* These components are for displaying toasts and tooltips globally */}
+        {/* Global toasts */}
         <Toaster />
         <Sonner />
-        {/* The BrowserRouter is now in main.jsx, so we remove it here */}
+        
         <Routes>
           {/* Public and Clerk Auth Routes */}
           <Route path="/" element={<LandingPage />} />
@@ -39,7 +41,7 @@ function App() {
           <Route path="/sign-in" element={<SignInPage />} />
           <Route path="/redirector" element={<Redirector />} />
 
-          {/* Protected Routes (require sign-in) */}
+          {/* Protected Routes (require Clerk sign-in) */}
           <Route
             path="/profile"
             element={
@@ -72,8 +74,6 @@ function App() {
               </SignedIn>
             }
           />
-          
-          {/* Newly Integrated Routes */}
           <Route
             path="/applications"
             element={
@@ -90,16 +90,12 @@ function App() {
               </SignedIn>
             }
           />
-          <Route
-            path="/admin"
-            element={
-              <SignedIn>
-                <AdminDashboard />
-              </SignedIn>
-            }
-          />
 
-          {/* The catch-all route handles non-existent paths */}
+          {/* Admin Routes */}
+          <Route path="/admin-login" element={<AdminLogin />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+
+          {/* Catch-all route */}
           <Route path="*" element={<NotFound />} />
         </Routes>
       </TooltipProvider>

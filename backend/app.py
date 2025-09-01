@@ -1,34 +1,55 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Optional
 import os
 import pymongo
 import joblib
 import pandas as pd
-import shap
+from urllib.parse import unquote
 
 from dotenv import load_dotenv
-from typing import Optional
-
 load_dotenv()
 
-#MongoDB connection
+# Custom modules
+from inference_utils import infer_user, pd_to_tier, aggregate_user_scores
+
+# MongoDB connection
 client = pymongo.MongoClient(os.getenv("MONGO_URI"))
 db = client["bharatscore"]
 users_coll = db["users"]
 
-#Model Loading
-pipeline_data = joblib.load("bharatscore_pipeline.pkl")
-model_pipeline = pipeline_data["model"]
-best_threshold = pipeline_data["threshold"]
+# Simple inference class
+class SimpleInference:
+    def __init__(self, preprocessor, calibrated_clf):
+        self.pre = preprocessor
+        self.clf = calibrated_clf
+    
+    def predict_proba(self, X):
+        X_enc = self.pre.transform(X)
+        return self.clf.predict_proba(X_enc)
+    
+    def predict(self, X, thr=0.5):
+        return (self.predict_proba(X)[:,1] >= thr).astype(int)
 
-print(f"Model & pipeline loaded | Best threshold: {best_threshold}")
-print("Pipeline steps:", list(model_pipeline.named_steps.keys()))
+# Load model bundle
+try:
+    bundle = joblib.load("artifacts/bharatscore_pipeline_bundle.pkl")
+    inference = SimpleInference(bundle["preprocessor"], bundle["calibrated_clf"])
+    explainer = bundle["explainer"]
+    feature_names = bundle["feature_names"]
+    print("Models loaded successfully!")
+except Exception as e:
+    print(f"Error loading models: {e}")
+    import traceback
+    traceback.print_exc()
+    bundle = inference = explainer = feature_names = None
 
-app = FastAPI(title="Bharat Score API", description="API for Bharat Score Prediction", version="1.0")
+# FastAPI app
+app = FastAPI(title="Bharat Score API", version="2.0")
 
-#CORS for Frontend
+# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -37,43 +58,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#For Profile
+# -------------------- MODELS --------------------
 class ProfileRequest(BaseModel):
     clerk_user_id: str
     name: str
     gender: str
     state: str
     occupation: str
-
-@app.post("/profile")
-def create_or_update_profile(req: ProfileRequest):
-    """Create or update a basic user profile"""
-    doc = {
-        "clerk_user_id": req.clerk_user_id,
-        "profile": {
-            "name": req.name,
-            "gender": req.gender,
-            "state": req.state,
-            "occupation": req.occupation,
-        },
-        "has_profile": True,
-        "profile_updated_at": datetime.utcnow(),
-    }
-    users_coll.update_one(
-        {"clerk_user_id": req.clerk_user_id},
-        {"$set": doc},
-        upsert=True
-    )
-    return {"status": "stored", "clerk_user_id": req.clerk_user_id}
-
-@app.get("/profile")
-def get_profile(clerk_user_id: str):
-    """Return profile for a given clerk_user_id"""
-    proj = {"_id": 0, "profile": 1, "has_profile": 1, "clerk_user_id": 1}
-    user = users_coll.find_one({"clerk_user_id": clerk_user_id}, proj)
-    if user and user.get("profile"):
-        return {"profile": user["profile"], "has_profile": True}
-    return {"profile": None, "has_profile": False}
 
 class OnboardRequest(BaseModel):
     clerk_user_id: str
@@ -88,7 +79,10 @@ class OnboardRequest(BaseModel):
     coop_score: float
     land_verified: int
     age_group: str
-    # device_id: str
+    loan_amount_requested: float
+    recharge_pattern: str
+    loan_category: str
+    psychometric_score: float
     consent: bool = True
 
 class InputData(BaseModel):
@@ -103,19 +97,82 @@ class InputData(BaseModel):
     coop_score: float
     land_verified: int
     age_group: str
+    loan_amount_requested: float
+    recharge_pattern: str
+    loan_category: str
+    psychometric_score: float
 
-def get_risk_tier(pd):
-    if pd < 0.05: return "A+"
-    elif pd < 0.10: return "A"
-    elif pd < 0.20: return "B"
-    elif pd < 0.35: return "C"
-    else: return "D"
+class PsychometricScoreRequest(BaseModel):
+    clerk_user_id: str
+    psychometric_score: float
 
+class ApplicationUpdateRequest(BaseModel):
+    status: str
+    remarks: Optional[str] = ""
+    admin_notes: Optional[str] = ""
+
+class AIInsightRequest(BaseModel):
+    clerk_user_id: str
+    application_created: str
+
+# -------------------- HELPER FUNCTIONS --------------------
+def find_application_by_timestamp(clerk_user_id: str, timestamp_str: str):
+    """Find application with flexible timestamp matching"""
+    decoded_timestamp = unquote(timestamp_str)
+    
+    # Try multiple timestamp formats
+    timestamp_variants = [
+        decoded_timestamp,
+        decoded_timestamp + 'Z' if not decoded_timestamp.endswith('Z') else decoded_timestamp,
+        decoded_timestamp.replace('Z', '') if decoded_timestamp.endswith('Z') else decoded_timestamp,
+        decoded_timestamp + '.000Z' if '.' not in decoded_timestamp else decoded_timestamp,
+        decoded_timestamp.replace('.000Z', 'Z') if '.000Z' in decoded_timestamp else decoded_timestamp,
+        decoded_timestamp + '.000000' if '.' not in decoded_timestamp else decoded_timestamp,
+        decoded_timestamp.replace('.000000', '') if '.000000' in decoded_timestamp else decoded_timestamp,
+    ]
+    
+    for ts_variant in timestamp_variants:
+        application = users_coll.find_one({
+            "clerk_user_id": clerk_user_id,
+            "created": ts_variant
+        })
+        if application:
+            return application, ts_variant
+    
+    return None, None
+
+# -------------------- ENDPOINTS --------------------
+
+# Profile endpoints
+@app.post("/profile")
+def create_or_update_profile(req: ProfileRequest):
+    doc = {
+        "clerk_user_id": req.clerk_user_id,
+        "profile": {
+            "name": req.name,
+            "gender": req.gender,
+            "state": req.state,
+            "occupation": req.occupation,
+        },
+        "has_profile": True,
+        "profile_updated_at": datetime.utcnow(),
+    }
+    users_coll.update_one({"clerk_user_id": req.clerk_user_id}, {"$set": doc}, upsert=True)
+    return {"status": "stored", "clerk_user_id": req.clerk_user_id}
+
+@app.get("/profile")
+def get_profile(clerk_user_id: str):
+    proj = {"_id": 0, "profile": 1, "has_profile": 1, "clerk_user_id": 1}
+    user = users_coll.find_one({"clerk_user_id": clerk_user_id}, proj)
+    if user and user.get("profile"):
+        return {"profile": user["profile"], "has_profile": True}
+    return {"profile": None, "has_profile": False}
+
+# Onboarding
 @app.post("/onboard")
 def onboard(req: OnboardRequest):
     if req.bill_on_time_ratio is None:
-        req.bill_on_time_ratio = 0.0 
-    
+        req.bill_on_time_ratio = 0.0
     doc = {
         "clerk_user_id": req.clerk_user_id,
         "raw": req.dict(),
@@ -125,176 +182,514 @@ def onboard(req: OnboardRequest):
     inserted_id = users_coll.insert_one(doc).inserted_id
     return {"mongo_id": str(inserted_id), "clerk_user_id": req.clerk_user_id, "status": "stored"}
 
+# Prediction endpoints
 @app.post("/predict")
 def predict(data: InputData):
-    df = pd.DataFrame([data.dict()])
+    if inference is None:
+        return {"error": "Model not loaded"}
+    try:
+        df = pd.DataFrame([data.dict()])
+        result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+        return result
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "details": traceback.format_exc()}
+
+@app.get("/predict/{user_id}")
+def predict_existing_user(user_id: str):
+    from bson import ObjectId
+    if inference is None:
+        return {"error": "Model not loaded"}
+    user = users_coll.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        return {"error": "User not found"}
+    raw_data = user["raw"]
+    df = pd.DataFrame([raw_data])
+    result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+    users_coll.update_one({"_id": ObjectId(user_id)}, {"$set": {"prediction": result, "status": "predicted"}})
+    return result
+
+# Psychometric endpoints
+@app.post("/save-psychometric")
+def save_psychometric_score(req: PsychometricScoreRequest):
+    score = req.psychometric_score
+    if score < 0 or score > 1:
+        raise HTTPException(status_code=400, detail="Score must be between 0 and 1")
     
-    pd_prob = model_pipeline.predict_proba(df)[:, 1][0]
-    risk_tier = get_risk_tier(pd_prob)
+    user = users_coll.find_one({"clerk_user_id": req.clerk_user_id})
+    now = datetime.utcnow()
     
-    classifier = model_pipeline.named_steps['classifier']
-    preprocessor = model_pipeline.named_steps['preprocessor']
+    # Check monthly restriction
+    if user and "psychometric_taken_at" in user:
+        last_taken = user["psychometric_taken_at"]
+        days_diff = (now - last_taken).days
+        if days_diff < 30:
+            next_date = (last_taken + timedelta(days=30)).strftime("%Y-%m-%d")
+            raise HTTPException(status_code=400, detail=f"Test can be taken only once per month. Next eligible date: {next_date}")
     
-    X_transformed = preprocessor.transform(df)
-    
-    explainer = shap.TreeExplainer(classifier)
-    
-    shap_values = explainer.shap_values(X_transformed)
-    
-    if isinstance(shap_values, list):
-        if len(shap_values) > 1:
-            shap_values = shap_values[1]
-        else:
-            shap_values = shap_values[0]
-    
-    shap_values = shap_values[0]
-    
-    feature_names = preprocessor.get_feature_names_out()
-    
-    feature_importance = sorted(
-        zip(feature_names, shap_values),
-        key=lambda x: abs(x[1]),
-        reverse=True
-    )[:5]
+    users_coll.update_one(
+        {"clerk_user_id": req.clerk_user_id},
+        {"$set": {"psychometric_score": score, "psychometric_taken_at": now}},
+        upsert=True
+    )
+    return {"status": "saved", "clerk_user_id": req.clerk_user_id, "score": score, "taken_at": now}
+
+@app.get("/psychometric-status")
+def psychometric_status(clerk_user_id: str):
+    user = users_coll.find_one({"clerk_user_id": clerk_user_id})
+    if not user or "psychometric_score" not in user:
+        return {"completed": False}
     
     return {
-        "pd": round(float(pd_prob), 4),
-        "risk_tier": risk_tier,
-        "prediction": "High Risk" if pd_prob > best_threshold else "Low Risk",
-        "top_features": [
-            {"feature": f, "impact": round(float(v), 4)}
-            for f, v in feature_importance
-        ]
+        "completed": True,
+        "score": user["psychometric_score"],
+        "last_test_date": user["psychometric_taken_at"].isoformat() if "psychometric_taken_at" in user else None
     }
+
+# User data endpoints
+@app.get("/users")
+def get_user_data(clerk_user_id: str):
+    apps_cursor = users_coll.find({"clerk_user_id": clerk_user_id}, {"_id": 0})
+    applications = list(apps_cursor)
+    if not applications:
+        raise HTTPException(status_code=404, detail="No applications found")
+
+    # Define required fields for the model
+    REQUIRED_FIELDS = {
+        "user_type", "region", "sms_count", "bill_on_time_ratio", "recharge_freq",
+        "sim_tenure", "location_stability", "income_signal", "coop_score",
+        "land_verified", "age_group", "loan_amount_requested", "recharge_pattern",
+        "loan_category", "psychometric_score",
+    }
+
+    loan_results = []
+    for app in applications:
+        raw_data = app.get("raw")
+        if not raw_data:
+            continue
+
+        # Skip if any required field is missing
+        if not REQUIRED_FIELDS.issubset(raw_data.keys()):
+            print(f"Skipping app due to missing fields: {raw_data}")
+            continue
+
+        df = pd.DataFrame([raw_data])
+        result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+
+        # Add extra metadata
+        result["loan_amount_requested"] = raw_data.get("loan_amount_requested", 0)
+        result["created"] = app.get("created")
+        result["status"] = app.get("status")
+        loan_results.append(result)
+
+    if not loan_results:
+        raise HTTPException(status_code=400, detail="No valid applications found for scoring")
+
+    aggregated = aggregate_user_scores(loan_results)
+
+    return {
+        "applications": loan_results, 
+        "final_cibil_score": aggregated["final_cibil_score"],
+        "final_tier": aggregated["final_tier"],
+        "loan_count": aggregated["loan_count"],
+    }
+
+# Admin endpoints
+@app.get("/admin/applications-summary")
+def admin_applications_summary():
+    pipeline = [
+        {
+            "$group": {
+                "_id": "$status",
+                "count": {"$sum": 1}
+            }
+        }
+    ]
+    counts = list(users_coll.aggregate(pipeline))
+
+    total = sum([c["count"] for c in counts])
+    summary = {"total_applications": total, "pending": 0, "approved": 0, "issues": 0}
+
+    for c in counts:
+        if c["_id"] in ["received", "pending"]:
+            summary["pending"] += c["count"]
+        elif c["_id"] == "approved":
+            summary["approved"] += c["count"]
+        elif c["_id"] in ["issue", "rejected"]:
+            summary["issues"] += c["count"]
+
+    # Get latest applicants list
+    cursor = users_coll.find({}, {
+        "_id": 0,
+        "clerk_user_id": 1,
+        "profile.name": 1,
+        "status": 1,
+        "created": 1,
+        "raw.loan_amount_requested": 1
+    }).sort("created", -1)
+
+    applicants = []
+    for doc in cursor:
+        applicants.append({
+            "clerk_user_id": doc.get("clerk_user_id"),
+            "name": doc.get("profile", {}).get("name"),
+            "status": doc.get("status", "pending"),
+            "created": doc.get("created"),
+            "loan_amount_requested": doc.get("raw", {}).get("loan_amount_requested", 0)
+        })
+
+    summary["applicants"] = applicants
+    return summary
+
+@app.get("/admin/applications/{clerk_user_id}")
+def admin_application_detail(clerk_user_id: str):
+    user_docs = list(users_coll.find({"clerk_user_id": clerk_user_id}))
+
+    if not user_docs:
+        raise HTTPException(status_code=404, detail="No applications found for this user")
+
+    profile = user_docs[0].get("profile", {})
+    applications = []
+
+    for app in user_docs:
+        raw_data = app.get("raw")
+        if not raw_data:
+            continue
+
+        # Get existing model output or generate new one
+        model_result = app.get("model_output")
+        if not model_result:
+            try:
+                df = pd.DataFrame([raw_data])
+                model_result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+                # Save the model output
+                users_coll.update_one(
+                    {"_id": app["_id"]},
+                    {"$set": {"model_output": model_result}}
+                )
+            except Exception as e:
+                model_result = {"error": str(e)}
+
+        applications.append({
+            "raw": raw_data,
+            "model_output": model_result,
+            "created": app.get("created"),
+            "status": app.get("status", "pending"),
+            "ai_insight": app.get("ai_insight", ""),
+            "admin_remarks": app.get("admin_remarks", ""),
+            "admin_notes": app.get("admin_notes", ""),
+            "user_notification": app.get("user_notification", {})
+        })
+
+    return {
+        "clerk_user_id": clerk_user_id,
+        "profile": profile,
+        "applications": applications
+    }
+
+# FIXED: Single application update endpoint with proper timestamp handling
+@app.patch("/admin/applications/{clerk_user_id}/{created_timestamp}")
+def update_application_status(clerk_user_id: str, created_timestamp: str, update_req: ApplicationUpdateRequest):
+    """Update application status with flexible timestamp matching"""
+    
+    valid_status = {"approved", "rejected", "issue", "pending"}
+    if update_req.status not in valid_status:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Allowed: {valid_status}")
+
+    # Find application with flexible timestamp matching
+    application, matched_timestamp = find_application_by_timestamp(clerk_user_id, created_timestamp)
+    
+    if not application:
+        # Debug: Show what timestamps are available
+        all_apps = list(users_coll.find(
+            {"clerk_user_id": clerk_user_id},
+            {"created": 1, "_id": 0}
+        ))
+        available_timestamps = [str(app.get("created", "")) for app in all_apps]
+        
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Application not found. Available timestamps: {available_timestamps}. Searched for: {unquote(created_timestamp)}"
+        )
+
+    # Prepare update document
+    update_doc = {
+        "status": update_req.status,
+        "admin_remarks": update_req.remarks,
+        "admin_notes": update_req.admin_notes,
+        "status_updated_at": datetime.utcnow(),
+        "status_updated_by": "admin"
+    }
+    
+    # Generate status-specific message for user
+    status_messages = {
+        "approved": "Congratulations! Your loan application has been approved. Please visit the nearest branch for document verification and loan disbursement.",
+        "rejected": "Your loan application has been declined. Please contact our support team for more information.",
+        "issue": "Your application requires additional review. Our team will contact you shortly with next steps.",
+        "pending": "Your application is under review. We will update you on the progress soon."
+    }
+    
+    update_doc["user_notification"] = {
+        "message": status_messages.get(update_req.status, "Your application status has been updated."),
+        "timestamp": datetime.utcnow(),
+        "read": False
+    }
+
+    # Update using the matched timestamp
+    result = users_coll.update_one(
+        {"clerk_user_id": clerk_user_id, "created": matched_timestamp},
+        {"$set": update_doc}
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Failed to update application")
+
+    return {
+        "message": "Application updated successfully",
+        "clerk_user_id": clerk_user_id,
+        "created": matched_timestamp,
+        "new_status": update_req.status,
+        "admin_remarks": update_req.remarks,
+        "user_notification": update_doc["user_notification"]
+    }
+
+@app.post("/admin/generate-insight")
+async def generate_ai_insight(req: AIInsightRequest):
+    """Generate natural language AI insights for admin review"""
+    
+    # Find the specific application
+    app = users_coll.find_one({
+        "clerk_user_id": req.clerk_user_id,
+        "created": req.application_created
+    })
+    
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    
+    raw_data = app.get("raw")
+    if not raw_data:
+        raise HTTPException(status_code=400, detail="No application data found")
+    
+    # Generate model prediction if not exists
+    try:
+        df = pd.DataFrame([raw_data])
+        model_result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+    except Exception as e:
+        return {"error": f"Model prediction failed: {str(e)}"}
+    
+    # Create natural language insight
+    profile = app.get("profile", {})
+    applicant_name = profile.get("name", "Unknown User")
+    loan_amount = raw_data.get("loan_amount_requested", 0)
+    
+    # Build insight based on model output
+    insight = f"AI Assessment for {applicant_name}:\n\n"
+    
+    if model_result.get("final_cibil_score"):
+        score = model_result["final_cibil_score"]
+        insight += f"• Bharat Credit Score: {score}/1000 "
+        if score >= 700:
+            insight += "(Excellent creditworthiness)\n"
+        elif score >= 600:
+            insight += "(Good creditworthiness)\n"
+        elif score >= 400:
+            insight += "(Fair creditworthiness - requires careful evaluation)\n"
+        else:
+            insight += "(Poor creditworthiness - high risk)\n"
+    
+    if model_result.get("loan_approval_probability"):
+        prob = model_result["loan_approval_probability"] * 100
+        insight += f"• Approval Probability: {prob:.1f}%\n"
+    
+    if model_result.get("final_tier"):
+        tier = model_result["final_tier"]
+        insight += f"• Risk Category: {tier}\n"
+    
+    if model_result.get("recommended_interest_rate"):
+        rate = model_result["recommended_interest_rate"]
+        insight += f"• Recommended Interest Rate: {rate}% per annum\n"
+    
+    # Add key factors analysis
+    if model_result.get("top_factors"):
+        insight += "\nKey Decision Factors:\n"
+        for factor, impact in model_result["top_factors"].items():
+            factor_name = factor.replace("_", " ").title()
+            impact_text = "positively influences" if impact > 0 else "negatively impacts"
+            insight += f"• {factor_name} {impact_text} the decision\n"
+    
+    # Add recommendation based on approval probability
+    if model_result.get("loan_approval_probability"):
+        prob = model_result["loan_approval_probability"]
+        insight += "\nAI Recommendation: "
+        if prob >= 0.7:
+            insight += "APPROVE - Strong candidate with low risk profile"
+        elif prob >= 0.4:
+            insight += "REVIEW - Moderate risk, consider additional verification"
+        else:
+            insight += "HIGH RISK - Requires careful manual assessment"
+    
+    # Store the insight in database
+    users_coll.update_one(
+        {"clerk_user_id": req.clerk_user_id, "created": req.application_created},
+        {"$set": {
+            "ai_insight": insight,
+            "ai_insight_generated_at": datetime.utcnow(),
+            "model_output": model_result
+        }}
+    )
+    
+    return {
+        "insight": insight,
+        "model_output": model_result,
+        "generated_at": datetime.utcnow()
+    }
+
+# User notification endpoints
+@app.get("/user/notifications")
+def get_user_notifications(clerk_user_id: str):
+    """Get all notifications for a user"""
+    
+    applications = list(users_coll.find(
+        {"clerk_user_id": clerk_user_id, "user_notification": {"$exists": True}},
+        {"_id": 0, "user_notification": 1, "status": 1, "created": 1, "admin_remarks": 1}
+    ).sort("created", -1))
+    
+    notifications = []
+    for app in applications:
+        if "user_notification" in app:
+            notifications.append({
+                "message": app["user_notification"]["message"],
+                "timestamp": app["user_notification"]["timestamp"],
+                "read": app["user_notification"].get("read", False),
+                "status": app["status"],
+                "application_date": app["created"],
+                "admin_remarks": app.get("admin_remarks", "")
+            })
+    
+    return {"notifications": notifications}
+
+@app.post("/user/notifications/mark-read")
+def mark_notifications_read(clerk_user_id: str):
+    """Mark all notifications as read for a user"""
+    
+    users_coll.update_many(
+        {"clerk_user_id": clerk_user_id, "user_notification.read": False},
+        {"$set": {"user_notification.read": True}}
+    )
+    
+    return {"message": "All notifications marked as read"}
+
+@app.get("/user/notifications/{clerk_user_id}")
+def get_user_notifications_detailed(clerk_user_id: str):
+    """Get all notifications for a user with detailed application info"""
+    
+    applications = list(users_coll.find(
+        {"clerk_user_id": clerk_user_id, "user_notification": {"$exists": True}},
+        {
+            "_id": 0, 
+            "user_notification": 1, 
+            "status": 1, 
+            "created": 1, 
+            "admin_remarks": 1,
+            "raw.loan_amount_requested": 1,
+            "raw.loan_category": 1,
+            "model_output.final_cibil_score": 1,
+            "model_output.final_tier": 1,
+            "profile.name": 1
+        }
+    ).sort("user_notification.timestamp", -1))
+    
+    notifications = []
+    for app in applications:
+        if "user_notification" in app:
+            notifications.append({
+                "id": f"{clerk_user_id}_{app['created']}",
+                "message": app["user_notification"]["message"],
+                "timestamp": app["user_notification"]["timestamp"],
+                "read": app["user_notification"].get("read", False),
+                "status": app["status"],
+                "application_date": app["created"],
+                "admin_remarks": app.get("admin_remarks", ""),
+                "loan_amount": app.get("raw", {}).get("loan_amount_requested", 0),
+                "loan_category": app.get("raw", {}).get("loan_category", ""),
+                "cibil_score": app.get("model_output", {}).get("final_cibil_score"),
+                "risk_tier": app.get("model_output", {}).get("final_tier"),
+                "applicant_name": app.get("profile", {}).get("name", "")
+            })
+    
+    return {"notifications": notifications}
+
+@app.get("/user/notifications/count/{clerk_user_id}")
+def get_unread_notification_count(clerk_user_id: str):
+    """Get count of unread notifications for a user"""
+    
+    count = users_coll.count_documents({
+        "clerk_user_id": clerk_user_id, 
+        "user_notification.read": False
+    })
+    
+    return {"unread_count": count}
+
+@app.patch("/user/notifications/{clerk_user_id}/mark-read")
+def mark_specific_notification_read(clerk_user_id: str, notification_id: str = None):
+    """Mark specific notification as read"""
+    
+    if notification_id:
+        # Extract created timestamp from notification_id
+        try:
+            created_str = notification_id.split(f"{clerk_user_id}_")[1]
+            users_coll.update_one(
+                {
+                    "clerk_user_id": clerk_user_id, 
+                    "created": created_str,
+                    "user_notification.read": False
+                },
+                {"$set": {"user_notification.read": True}}
+            )
+        except IndexError:
+            pass
+    else:
+        # Mark all as read
+        users_coll.update_many(
+            {"clerk_user_id": clerk_user_id, "user_notification.read": False},
+            {"$set": {"user_notification.read": True}}
+        )
+    
+    return {"message": "Notification(s) marked as read"}
+
+@app.get("/user/applications/{clerk_user_id}")
+def get_user_applications_with_notifications(clerk_user_id: str):
+    """Get user applications with latest notification status"""
+    try:
+        applications = list(users_coll.find(
+            {"clerk_user_id": clerk_user_id},
+            {
+                "_id": 0,
+                "created": 1,
+                "status": 1,
+                "raw": 1,
+                "model_output": 1,
+                "user_notification": 1,
+                "admin_remarks": 1,
+                "admin_notes": 1,
+                "status_updated_at": 1,
+                "status_updated_by": 1
+            }
+        ).sort("created", -1).limit(50))
+        
+        return {
+            "applications": applications,
+            "total_count": len(applications)
+        }
+    except Exception as e:
+        print(f"Error fetching applications: {e}")
+        return {"applications": [], "total_count": 0, "error": str(e)}
+
+# Health check
+@app.get("/health")
+def health_check():
+    return {"status": "healthy", "models_loaded": inference is not None, "explainer_loaded": explainer is not None}
 
 @app.get("/")
 def root():
-    return {"message": "Bharat Score API is running!"}
-
-@app.get("/user/{user_id}")
-def get_user(user_id: str):
-    """Get user data by ID"""
-    try:
-        from bson import ObjectId
-        user = users_coll.find_one({"_id": ObjectId(user_id)})
-        if user:
-            user["_id"] = str(user["_id"])
-            return user
-        return {"error": "User not found"}
-    except Exception as e:
-        return {"error": f"Invalid user ID: {str(e)}"}
-    
-@app.get("/users")
-def get_all_users(clerk_user_id: str = None):
-    """Get all users with Filter by Clerk User ID (that's because as of now we will fetch users from their Clerk ID)"""
-    try:
-        query = {}
-        if clerk_user_id:
-            query["raw.clerk_user_id"] = clerk_user_id
-        
-        users = list(users_coll.find(query).limit(100))
-        for user in users:
-            user["_id"] = str(user["_id"])
-        return {"users": users, "count": len(users)}
-    except Exception as e:
-        return {"error": str(e)}
-    
-@app.post("/predict/{user_id}")
-def predict_existing_user(user_id: str):
-    """Predict risk for an existing user from database"""
-    try:
-        from bson import ObjectId
-        user = users_coll.find_one({"_id": ObjectId(user_id)})
-        if not user:
-            return {"error": "User not found"}
-        
-        raw_data = user["raw"]
-        
-        #Converting to InputData format
-        input_data = {
-            "user_type": raw_data["user_type"],
-            "region": raw_data["region"],
-            "sms_count": raw_data["sms_count"],
-            "bill_on_time_ratio": raw_data.get("bill_on_time_ratio", 0.0),
-            "recharge_freq": raw_data["recharge_freq"],
-            "sim_tenure": raw_data["sim_tenure"],
-            "location_stability": raw_data["location_stability"],
-            "income_signal": raw_data["income_signal"],
-            "coop_score": raw_data["coop_score"],
-            "land_verified": raw_data["land_verified"],
-            "age_group": raw_data["age_group"]
-        }
-        
-        df = pd.DataFrame([input_data])
-        
-        pd_prob = model_pipeline.predict_proba(df)[:, 1][0]
-        risk_tier = get_risk_tier(pd_prob)
-        
-        classifier = model_pipeline.named_steps['classifier']
-        preprocessor = model_pipeline.named_steps['preprocessor']
-        
-        X_transformed = preprocessor.transform(df)
-        
-        explainer = shap.TreeExplainer(classifier)
-        shap_values = explainer.shap_values(X_transformed)
-        
-        if isinstance(shap_values, list):
-            if len(shap_values) > 1:
-                shap_values = shap_values[1]
-            else:
-                shap_values = shap_values[0]
-        
-        shap_values = shap_values[0]
-        feature_names = preprocessor.get_feature_names_out()
-        
-        feature_importance = sorted(
-            zip(feature_names, shap_values),
-            key=lambda x: abs(x[1]),
-            reverse=True
-        )[:5]
-        
-        #Updating user record with prediction
-        prediction_result = {
-            "pd": round(float(pd_prob), 4),
-            "risk_tier": risk_tier,
-            "prediction": "High Risk" if pd_prob > best_threshold else "Low Risk",
-            "predicted_at": datetime.utcnow()
-        }
-        
-        users_coll.update_one(
-            {"_id": ObjectId(user_id)},
-            {"$set": {"prediction": prediction_result, "status": "predicted"}}
-        )
-        
-        return {
-            "user_id": user_id,
-            "pd": round(float(pd_prob), 4),
-            "risk_tier": risk_tier,
-            "prediction": "High Risk" if pd_prob > best_threshold else "Low Risk",
-            "top_features": [
-                {"feature": f, "impact": round(float(v), 4)}
-                for f, v in feature_importance
-            ]
-        }
-        
-    except Exception as e:
-        return {"error": str(e)}
-    
-@app.get("/stats")
-def get_stats():
-    """Get database and prediction statistics"""
-    try:
-        total_users = users_coll.count_documents({})
-        predicted_users = users_coll.count_documents({"prediction": {"$exists": True}})
-        high_risk_users = users_coll.count_documents({"prediction.prediction": "High Risk"})
-        low_risk_users = users_coll.count_documents({"prediction.prediction": "Low Risk"})
-        
-        return {
-            "total_users": total_users,
-            "predicted_users": predicted_users,
-            "pending_predictions": total_users - predicted_users,
-            "high_risk_users": high_risk_users,
-            "low_risk_users": low_risk_users
-        }
-    except Exception as e:
-        return {"error": str(e)}
+    return {"message": "Bharat Score API v2 is running!"}

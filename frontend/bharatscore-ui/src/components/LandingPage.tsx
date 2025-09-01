@@ -8,6 +8,15 @@ const LandingPage: FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-orange-100 flex flex-col items-center justify-center px-6 py-12 relative overflow-hidden">
       
+      {/* Top-right Admin Login button */}
+      <div className="absolute top-4 right-6">
+        <Button 
+          label="Login as Admin" 
+          onClick={() => navigate("/admin-login")} 
+          variant="outline"
+        />
+      </div>
+
       {/* Main content */}
       <div className="text-center z-8 max-w-md mx-auto">
         <div className="mb-4 relative">
