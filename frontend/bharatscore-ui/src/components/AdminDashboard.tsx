@@ -86,7 +86,7 @@ Write a concise credit risk report including summary, strengths, weaknesses, and
         Generate a professional remark (2-3 sentences) explaining the decision. For approved applications, mention document verification requirement. For rejected applications, mention specific concerns.
       `;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyC4bNxytCxmzT7BEIE-MK-SPYZgtoJmMeE`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -127,7 +127,7 @@ Write a concise credit risk report including summary, strengths, weaknesses, and
         const prompt = buildGeminiPrompt();
 
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyC4bNxytCxmzT7BEIE-MK-SPYZgtoJmMeE`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -514,7 +514,7 @@ export default function AdminDashboard() {
   const [creditRiskUser, setCreditRiskUser] = useState<{ user: any, model: any, application: any } | null>(null);
 
   // Add your Gemini API key here
-  const GEMINI_API_KEY = "AIzaSyC4bNxytCxmzT7BEIE-MK-SPYZgtoJmMeE";
+  const GEMINI_API_KEY = "";
 
   // Show success message temporarily
   const showSuccessMessage = (message: string) => {

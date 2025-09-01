@@ -99,7 +99,7 @@ export default function CreditRiskDashboard({ clerkUserId, userData, modelOutput
         const prompt = buildGeminiPrompt();
 
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=AIzaSyC4bNxytCxmzT7BEIE-MK-SPYZgtoJmMeE`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
