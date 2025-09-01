@@ -14,6 +14,7 @@ import Dashboard from "./components/Dashboard";
 import Redirector from "./components/Redirector";
 import ApplyForm from "./components/ApplyForm";
 import BehavioralPsychometricTest from "./components/psychometricTest";
+import AadhaarVerification from "./components/AdharVerification";
 
 // Admin components
 import AdminLogin from "./components/AdminLogin";
@@ -90,6 +91,25 @@ function App() {
               </SignedIn>
             }
           />
+<<<<<<< HEAD
+=======
+          <Route
+            path="/admin"
+            element={
+              <SignedIn>
+                <AdminDashboard />
+              </SignedIn>
+            }
+          />
+          <Route
+            path="/adhar"
+            element={
+              <SignedIn>
+                <AadhaarVerification/>
+              </SignedIn>
+            }
+          />
+>>>>>>> 5e43bf09ac974ab40b1fb886a9d5766d59004710
 
           {/* Admin Routes */}
           <Route path="/admin-login" element={<AdminLogin />} />
