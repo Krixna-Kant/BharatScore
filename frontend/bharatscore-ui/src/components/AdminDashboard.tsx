@@ -8,7 +8,9 @@ import {
   ChevronRight,
   Bell,
   RefreshCw,
+  ExternalLink
 } from "lucide-react";
+import CreditRiskDashboard from "./CreditRiskDashboard";
 
 // Simple UI Components
 const Card = ({ children, className = "" }) => (
@@ -170,6 +172,10 @@ export default function AdminDashboard() {
   const [updating, setUpdating] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
 
+  const [showCreditRisk, setShowCreditRisk] = useState(false);
+  const [creditRiskUser, setCreditRiskUser] = useState<{ user: any, model: any } | null>(null);
+
+
   // Add your Gemini API key here
   const GEMINI_API_KEY = "";
 
@@ -178,6 +184,13 @@ export default function AdminDashboard() {
     setSuccessMessage(message);
     setTimeout(() => setSuccessMessage(""), 3000);
   };
+
+  const viewCreditRiskReport = (clerkUserId) => {
+    window.open(`/credit-risk/${clerkUserId}`, '_blank');
+    console.log("viewCreditRiskReport", clerkUserId);
+    console.log("window.open", window.open(`/credit-risk/${clerkUserId}`, '_blank'));
+  };
+
 
   // FIXED: Generate AI remarks using Gemini with better error handling
   const generateAIRemarks = async (applicationData, status) => {
@@ -202,7 +215,7 @@ export default function AdminDashboard() {
         Generate a professional remark (2-3 sentences) explaining the decision. For approved applications, mention document verification requirement. For rejected applications, mention specific concerns. For flagged issues, mention what needs review.
       `;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`, {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -219,7 +232,7 @@ export default function AdminDashboard() {
           }
         })
       });
-
+      console.log("response", response);
       if (!response.ok) throw new Error('Failed to generate remarks');
       
       const data = await response.json();
@@ -280,6 +293,15 @@ export default function AdminDashboard() {
       setError(`Failed to load application details: ${err.message}`);
     }
   };
+
+
+  function openCreditRiskDashboard() {
+    if (!selectedApplication) return;
+    const validApp = selectedApplication.applications.find(app => app.model_output && !app.model_output.error);
+    if (!validApp) return alert("No valid application for credit risk assessment.");
+    setCreditRiskUser({ user: selectedApplication.profile, model: validApp.model_output });
+    setShowCreditRisk(true);
+  }
 
   // FIXED: Update application status with proper timestamp encoding
   const updateApplicationStatus = async (clerkUserId, created, newStatus, remarks = "") => {
@@ -817,6 +839,26 @@ export default function AdminDashboard() {
                             )}
                             {updating ? "Processing..." : "Flag Issue"}
                           </Button>
+
+                          {/* Details Modal */}
+      {selectedApplication && (
+        <div className="modal">
+          <h2>User: {selectedApplication.profile.name}</h2>
+          {/* Application details rendered */}
+          <button onClick={openCreditRiskDashboard}>View Credit Risk Dashboard</button>
+          <button onClick={() => setSelectedApplication(null)}>Close</button>
+        </div>
+      )}
+
+      {/* Credit Risk Dashboard */}
+      {showCreditRisk && creditRiskUser && (
+        <CreditRiskDashboard 
+          clerkUserId={creditRiskUser.user.id} 
+          userData={creditRiskUser.user}
+          modelOutput={creditRiskUser.model}
+          onClose={() => setShowCreditRisk(false)}
+        />
+      )}
                         </div>
 
                         {/* Raw Application Data (Collapsible) */}
