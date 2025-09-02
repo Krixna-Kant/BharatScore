@@ -2,7 +2,7 @@ import React, { useState, useCallback } from "react";
 import { Upload, Camera, FileText, CheckCircle, XCircle, Loader } from "lucide-react";
 
 interface AadhaarVerificationProps {
-  onAadhaarExtracted: (aadhaar: string, extractedData?: any) => void;
+  onAadhaarExtracted?: (aadhaar: string, extractedData?: any) => void;
 }
 
 interface VerificationResult {
@@ -116,7 +116,10 @@ const AadhaarVerification: React.FC<AadhaarVerificationProps> = ({
         // Extract additional personal information
         const personalInfo = extractPersonalInfo(parsedText);
         
-        onAadhaarExtracted(number, personalInfo);
+        // Call the callback if provided
+        if (onAadhaarExtracted) {
+          onAadhaarExtracted(number, personalInfo);
+        }
         
         setResult({
           message: `✅ Aadhaar details extracted successfully!`,
