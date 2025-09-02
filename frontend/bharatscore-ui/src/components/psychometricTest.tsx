@@ -28,6 +28,9 @@ const scoringMap: Record<number, number[]> = {
   7: [5, 4, 3, 2, 1],
 };
 
+// CONFIGURATION: Set to 0 to allow unlimited retakes
+const COOLDOWN_DAYS = 0; // No cooldown - users can retake anytime
+
 export default function BehavioralPsychometricTest() {
   const { user } = useUser();
   const navigate = useNavigate();
@@ -49,9 +52,9 @@ export default function BehavioralPsychometricTest() {
           const lastTest = new Date(data.last_test_date);
           const now = new Date();
           const diffDays = (now.getTime() - lastTest.getTime()) / (1000 * 3600 * 24);
-          if (diffDays < 30) {
+          if (diffDays < COOLDOWN_DAYS) { // Using configurable cooldown
             setCanTakeTest(false);
-            setNextEligibleDate(new Date(lastTest.getTime() + 30 * 24 * 60 * 60 * 1000));
+            setNextEligibleDate(new Date(lastTest.getTime() + COOLDOWN_DAYS * 24 * 60 * 60 * 1000));
           }
         }
       } catch (err) {
@@ -222,13 +225,13 @@ export default function BehavioralPsychometricTest() {
               <ul className="grid grid-cols-1 md:grid-cols-2 gap-4 text-base text-gray-700 font-medium">
                 {Object.entries(normalizedTraits).map(([trait, val]) => (
                   <li key={trait}>
-                    <span className="font-bold text-gray-900">{trait}:</span> {(val as number * 100).toFixed(1)} %
+                    <span className="font-bold text-gray-900">{trait}:</span> {(val as number * 10).toFixed(1)}/10
                   </li>
                 ))}
               </ul>
               <div className="pt-4 border-t border-orange-200">
                 <b className="text-xl font-extrabold text-gray-900">Composite Score:</b>
-                <span className="text-2xl font-extrabold text-orange-600 ml-2">{(compositeScore * 100).toFixed(1)} %</span>
+                <span className="text-2xl font-extrabold text-orange-600 ml-2">{(compositeScore * 10).toFixed(1)}/10</span>
               </div>
             </div>
             <button

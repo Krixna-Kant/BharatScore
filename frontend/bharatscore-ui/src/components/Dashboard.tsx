@@ -549,7 +549,7 @@ const Dashboard = () => {
                     psychometric.score
                   )}`}
                 >
-                  {psychometric.score ?? "N/A"} / 100
+                  {psychometric.score ?? "N/A"} / 1
                 </span>
               </p>
               <p className="mt-2 text-gray-600">

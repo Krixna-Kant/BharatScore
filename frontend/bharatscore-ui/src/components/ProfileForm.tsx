@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { useUser } from "@clerk/clerk-react";
+import { useNavigate } from "react-router-dom";
 import AadhaarVerification from "./AdharVerification";
 import { User, Mail, Phone, MapPin, Briefcase, Users, CheckCircle } from "lucide-react";
 
@@ -17,6 +19,9 @@ interface ProfileData {
 }
 
 const ProfileForm: React.FC = () => {
+  const { user } = useUser();
+  const navigate = useNavigate();
+  
   const [profile, setProfile] = useState<ProfileData>({
     name: "",
     email: "",
@@ -31,6 +36,8 @@ const ProfileForm: React.FC = () => {
     dateOfBirth: "",
   });
 
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [isValidAadhaar, setIsValidAadhaar] = useState<boolean | null>(null);
   const [aadhaarError, setAadhaarError] = useState("");
@@ -54,6 +61,40 @@ const ProfileForm: React.FC = () => {
     "Consultant", "Designer", "Writer", "Artist", "Farmer", "Government Employee",
     "Retired", "Unemployed", "Other"
   ];
+
+  // Load existing profile
+  useEffect(() => {
+    const fetchProfile = async () => {
+      if (!user) return;
+      try {
+        const res = await fetch(
+          `http://127.0.0.1:8000/profile?clerk_user_id=${user.id}`
+        );
+        const data = await res.json();
+        if (data?.has_profile && data.profile) {
+          setProfile((prev) => ({
+            ...prev,
+            name: data.profile.name || "",
+            email: data.profile.email || "",
+            phone: data.profile.phone || "",
+            gender: data.profile.gender || "",
+            state: data.profile.state || "",
+            occupation: data.profile.occupation || "",
+            aadhaarNumber: data.profile.aadhaarNumber || "",
+            address: data.profile.address || "",
+            city: data.profile.city || "",
+            pincode: data.profile.pincode || "",
+            dateOfBirth: data.profile.dateOfBirth || "",
+          }));
+        }
+      } catch (err) {
+        console.error("Error fetching profile:", err);
+      } finally {
+        setFetching(false);
+      }
+    };
+    fetchProfile();
+  }, [user]);
 
   // Aadhaar validation function
   const validateAadhaar = (aadhaar: string): boolean => {
@@ -197,7 +238,7 @@ const ProfileForm: React.FC = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          clerk_user_id: "user_123", // Replace with actual user ID
+          clerk_user_id: user?.id || "user_123",
           ...profile,
           aadhaar_number: profile.aadhaarNumber,
         }),
@@ -211,8 +252,7 @@ const ProfileForm: React.FC = () => {
         
         // Redirect to dashboard after 2 seconds
         setTimeout(() => {
-          // Replace with your actual routing logic
-          window.location.href = "/dashboard"; // or use React Router: navigate('/dashboard')
+          navigate('/dashboard');
         }, 2000);
       } else {
         throw new Error(data.message || "Failed to submit profile");
@@ -225,407 +265,194 @@ const ProfileForm: React.FC = () => {
     }
   };
 
-  const handleReset = () => {
-    setProfile({
-      name: "", email: "", phone: "", aadhaarNumber: "", address: "",
-      city: "", state: "", pincode: "", occupation: "", gender: "", dateOfBirth: ""
-    });
-    setSubmitted(false);
-    setIsValidAadhaar(null);
-    setAadhaarError("");
-    setCurrentStep(1);
-  };
+  // Reusable Input component
+  const InputField: React.FC<{
+    label: string;
+    name: string;
+    type?: string;
+    placeholder?: string;
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    readOnly?: boolean;
+  }> = ({ label, ...props }) => (
+    <div>
+      <label className="block text-gray-700 text-sm font-semibold mb-2">{label}</label>
+      <input
+        {...props}
+        className="w-full px-4 py-3 rounded-lg border-2 border-orange-200 focus:border-orange-500 focus:ring focus:ring-orange-200 focus:outline-none transition-colors duration-200"
+      />
+    </div>
+  );
 
-  if (submitted) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-green-50 to-blue-50 p-10">
-        <div className="bg-white rounded-2xl shadow-xl p-8 text-center max-w-md">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle className="w-8 h-8 text-green-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">
-            Profile Created Successfully!
-          </h2>
-          <p className="text-gray-600 mb-4">
-            Your profile has been saved. Redirecting to dashboard...
-          </p>
-          <div className="w-full bg-gray-200 rounded-full h-2">
-            <div className="bg-green-600 h-2 rounded-full animate-pulse" style={{width: '100%'}}></div>
-          </div>
-        </div>
-      </div>
-    );
+  // Reusable Select component
+  const SelectField: React.FC<{
+    label: string;
+    name: string;
+    value: string;
+    onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+    options: Array<{ value: string; label: string; disabled?: boolean }>;
+  }> = ({ label, options, ...props }) => (
+    <div>
+      <label className="block text-gray-700 text-sm font-semibold mb-2">{label}</label>
+      <select
+        {...props}
+        className="w-full px-4 py-3 rounded-lg border-2 border-orange-200 focus:border-orange-500 focus:ring focus:ring-orange-200 focus:outline-none transition-colors duration-200 bg-white"
+      >
+        {options.map((option) => (
+          <option key={option.value} value={option.value} disabled={option.disabled}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  if (!user) {
+    return <p>Please sign in to complete your profile.</p>;
+  }
+
+  if (fetching) {
+    return <p>Loading profile...</p>;
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 p-4">
-      <div className="max-w-4xl mx-auto">
-        {/* Progress Bar */}
-        <div className="mb-8">
-          <div className="flex items-center justify-center mb-4">
-            {[1, 2, 3].map((step) => (
-              <div key={step} className="flex items-center">
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
-                    currentStep >= step
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-gray-200 text-gray-600'
-                  }`}
-                >
-                  {step}
-                </div>
-                {step < 3 && (
-                  <div
-                    className={`w-16 h-1 ${
-                      currentStep > step ? 'bg-blue-600' : 'bg-gray-200'
-                    }`}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="text-center text-sm text-gray-600">
-            Step {currentStep} of 3: {
-              currentStep === 1 ? 'Basic Information' : 
-              currentStep === 2 ? 'Address Details' : 
-              'Additional Information'
-            }
-          </div>
+    <div className="max-w-2xl mx-auto bg-white shadow p-6 rounded-lg">
+      <h2 className="text-2xl font-bold mb-4">Complete Your Profile</h2>
+      
+      {submitted ? (
+        <div className="text-center py-8">
+          <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+          <h3 className="text-xl font-semibold text-green-600 mb-2">Profile Submitted Successfully!</h3>
+          <p className="text-gray-600">Redirecting to dashboard...</p>
         </div>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Aadhaar Verification Section */}
+          <AadhaarVerification onExtract={handleAadhaarExtracted} />
 
-        {/* Aadhaar Verification - Only show in step 1 */}
-        {currentStep === 1 && (
-          <div className="mb-8">
-            <AadhaarVerification onAadhaarExtracted={handleAadhaarExtracted} />
+          {/* Aadhaar Number Input */}
+          <InputField
+            label="Aadhaar Number"
+            name="aadhaarNumber"
+            value={formatAadhaarDisplay(profile.aadhaarNumber)}
+            onChange={handleAadhaarChange}
+            placeholder="1234 5678 9012"
+            readOnly={profile.aadhaarNumber.length === 12}
+          />
+          
+          {aadhaarError && (
+            <p className="text-red-500 text-sm mt-1">{aadhaarError}</p>
+          )}
+
+          {/* Basic Information */}
+          <InputField
+            label="Full Name"
+            name="name"
+            value={profile.name}
+            onChange={handleChange}
+            placeholder="Enter your full name"
+          />
+
+          <InputField
+            label="Email"
+            name="email"
+            type="email"
+            value={profile.email}
+            onChange={handleChange}
+            placeholder="Enter your email"
+          />
+
+          <InputField
+            label="Phone"
+            name="phone"
+            type="tel"
+            value={profile.phone}
+            onChange={handleChange}
+            placeholder="Enter your phone number"
+          />
+
+          <InputField
+            label="Date of Birth"
+            name="dateOfBirth"
+            type="date"
+            value={profile.dateOfBirth}
+            onChange={handleChange}
+          />
+
+          {/* Address Information */}
+          <div>
+            <label className="block text-gray-700 text-sm font-semibold mb-2">Address</label>
+            <textarea
+              name="address"
+              value={profile.address}
+              onChange={handleChange}
+              placeholder="Enter your address"
+              rows={3}
+              className="w-full px-4 py-3 rounded-lg border-2 border-orange-200 focus:border-orange-500 focus:ring focus:ring-orange-200 focus:outline-none transition-colors duration-200"
+            />
           </div>
-        )}
 
-        {/* Main Form */}
-        <form onSubmit={handleSubmit} className="bg-white shadow-2xl rounded-2xl overflow-hidden">
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-8 py-6">
-            <h1 className="text-3xl font-bold text-white text-center">
-              Create Your Profile
-            </h1>
-            <p className="text-center text-blue-100 mt-2">
-              Please fill in all the required information
-            </p>
-          </div>
+          <InputField
+            label="City"
+            name="city"
+            value={profile.city}
+            onChange={handleChange}
+            placeholder="Enter your city"
+          />
 
-          <div className="p-8">
-            {/* Step 1: Basic Information */}
-            {currentStep === 1 && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <User className="w-4 h-4 mr-2" />
-                      Full Name *
-                    </label>
-                    <input
-                      type="text"
-                      name="name"
-                      value={profile.name}
-                      onChange={handleChange}
-                      required
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                      placeholder="Enter your full name"
-                    />
-                  </div>
+          <SelectField
+            label="State"
+            name="state"
+            value={profile.state}
+            onChange={handleChange}
+            options={[
+              { value: "", label: "Select State", disabled: true },
+              ...indianStates.map(state => ({ value: state, label: state }))
+            ]}
+          />
 
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <Mail className="w-4 h-4 mr-2" />
-                      Email Address *
-                    </label>
-                    <input
-                      type="email"
-                      name="email"
-                      value={profile.email}
-                      onChange={handleChange}
-                      required
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                      placeholder="Enter your email address"
-                    />
-                  </div>
+          <InputField
+            label="PIN Code"
+            name="pincode"
+            value={profile.pincode}
+            onChange={handleChange}
+            placeholder="Enter PIN code"
+          />
 
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <Phone className="w-4 h-4 mr-2" />
-                      Phone Number *
-                    </label>
-                    <input
-                      type="tel"
-                      name="phone"
-                      value={profile.phone}
-                      onChange={handleChange}
-                      required
-                      pattern="[0-9]{10}"
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                      placeholder="10-digit mobile number"
-                    />
-                  </div>
+          {/* Personal Information */}
+          <SelectField
+            label="Gender"
+            name="gender"
+            value={profile.gender}
+            onChange={handleChange}
+            options={[
+              { value: "", label: "Select Gender", disabled: true },
+              { value: "Male", label: "Male" },
+              { value: "Female", label: "Female" },
+              { value: "Other", label: "Other" }
+            ]}
+          />
 
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Aadhaar Number *
-                    </label>
-                    <input
-                      type="text"
-                      name="aadhaarNumber"
-                      value={formatAadhaarDisplay(profile.aadhaarNumber)}
-                      onChange={handleAadhaarChange}
-                      maxLength={14}
-                      className={`w-full px-4 py-3 border rounded-lg transition-colors ${
-                        profile.aadhaarNumber 
-                          ? isValidAadhaar 
-                            ? 'bg-green-50 border-green-300 text-green-800' 
-                            : 'bg-red-50 border-red-300 text-red-800'
-                          : 'bg-white border-gray-300 text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
-                      } shadow-sm`}
-                      placeholder="Upload Aadhaar or enter manually"
-                      required
-                    />
-                    
-                    {profile.aadhaarNumber && (
-                      <div className="mt-2 flex items-center">
-                        {isValidAadhaar ? (
-                          <div className="flex items-center text-green-600 text-sm">
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Valid Aadhaar number
-                          </div>
-                        ) : (
-                          <div className="flex items-center text-red-600 text-sm">
-                            <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd"/>
-                            </svg>
-                            Invalid Aadhaar number
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    
-                    {aadhaarError && (
-                      <p className="mt-2 text-sm text-red-600">{aadhaarError}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+          <SelectField
+            label="Occupation"
+            name="occupation"
+            value={profile.occupation}
+            onChange={handleChange}
+            options={[
+              { value: "", label: "Select Occupation", disabled: true },
+              ...occupations.map(occupation => ({ value: occupation, label: occupation }))
+            ]}
+          />
 
-            {/* Step 2: Address Details */}
-            {currentStep === 2 && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 gap-6">
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <MapPin className="w-4 h-4 mr-2" />
-                      Complete Address *
-                    </label>
-                    <textarea
-                      name="address"
-                      value={profile.address}
-                      onChange={handleChange}
-                      required
-                      rows={3}
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors resize-none"
-                      placeholder="House No, Street, Area, Landmark"
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        City *
-                      </label>
-                      <input
-                        type="text"
-                        name="city"
-                        value={profile.city}
-                        onChange={handleChange}
-                        required
-                        className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                        placeholder="Enter your city"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        State *
-                      </label>
-                      <select
-                        name="state"
-                        value={profile.state}
-                        onChange={handleChange}
-                        required
-                        className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                      >
-                        <option value="">Select State</option>
-                        {indianStates.map((state) => (
-                          <option key={state} value={state}>
-                            {state}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        PIN Code *
-                      </label>
-                      <input
-                        type="text"
-                        name="pincode"
-                        value={profile.pincode}
-                        onChange={handleChange}
-                        required
-                        pattern="[0-9]{6}"
-                        maxLength={6}
-                        className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                        placeholder="6-digit PIN code"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Step 3: Additional Information */}
-            {currentStep === 3 && (
-              <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <Briefcase className="w-4 h-4 mr-2" />
-                      Occupation *
-                    </label>
-                    <select
-                      name="occupation"
-                      value={profile.occupation}
-                      onChange={handleChange}
-                      required
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                    >
-                      <option value="">Select Occupation</option>
-                      {occupations.map((occupation) => (
-                        <option key={occupation} value={occupation}>
-                          {occupation}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="flex items-center text-sm font-medium text-gray-700 mb-2">
-                      <Users className="w-4 h-4 mr-2" />
-                      Gender *
-                    </label>
-                    <select
-                      name="gender"
-                      value={profile.gender}
-                      onChange={handleChange}
-                      required
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                    >
-                      <option value="">Select Gender</option>
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
-                      <option value="Other">Other</option>
-                      <option value="Prefer not to say">Prefer not to say</option>
-                    </select>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Date of Birth (Optional)
-                    </label>
-                    <input
-                      type="date"
-                      name="dateOfBirth"
-                      value={profile.dateOfBirth}
-                      onChange={handleChange}
-                      className="w-full px-4 py-3 border rounded-lg text-gray-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 border-gray-300 shadow-sm transition-colors"
-                      max={new Date().toISOString().split('T')[0]}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Navigation Buttons */}
-            <div className="flex justify-between mt-8 pt-6 border-t border-gray-200">
-              <button
-                type="button"
-                onClick={prevStep}
-                disabled={currentStep === 1}
-                className={`px-6 py-3 font-medium rounded-xl transition duration-300 ${
-                  currentStep === 1
-                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                }`}
-              >
-                Previous
-              </button>
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-6 py-3 border border-gray-300 text-gray-700 font-medium rounded-xl hover:bg-gray-50 transition duration-300"
-                >
-                  Reset
-                </button>
-
-                {currentStep < 3 ? (
-                  <button
-                    type="button"
-                    onClick={nextStep}
-                    disabled={!validateCurrentStep()}
-                    className={`px-8 py-3 font-semibold rounded-xl transition duration-300 ${
-                      validateCurrentStep()
-                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-md'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    Next Step
-                  </button>
-                ) : (
-                  <button
-                    type="submit"
-                    disabled={!validateCurrentStep() || isSubmitting}
-                    className={`px-8 py-3 font-semibold rounded-xl transition duration-300 ${
-                      validateCurrentStep() && !isSubmitting
-                        ? 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white shadow-md'
-                        : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    }`}
-                  >
-                    {isSubmitting ? (
-                      <div className="flex items-center">
-                        <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                        Creating Profile...
-                      </div>
-                    ) : (
-                      'Create Profile'
-                    )}
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Form Validation Message */}
-            {!validateCurrentStep() && currentStep > 1 && (
-              <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <p className="text-yellow-800 text-sm text-center">
-                  Please fill in all required fields to continue
-                </p>
-              </div>
-            )}
-          </div>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="w-full bg-orange-600 hover:bg-orange-700 disabled:bg-orange-400 text-white py-3 px-6 rounded-lg font-semibold transition-colors duration-200"
+          >
+            {isSubmitting ? "Saving..." : "Save Profile"}
+          </button>
         </form>
-      </div>
+      )}
     </div>
   );
 };

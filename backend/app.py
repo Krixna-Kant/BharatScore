@@ -65,7 +65,6 @@ class ProfileRequest(BaseModel):
     gender: str
     state: str
     occupation: str
-    aadhaar_number: str | None = None
 
 class OnboardRequest(BaseModel):
     clerk_user_id: str
@@ -154,7 +153,6 @@ def create_or_update_profile(req: ProfileRequest):
             "gender": req.gender,
             "state": req.state,
             "occupation": req.occupation,
-            "aadhaar_number": req.aadhaar_number,
         },
         "has_profile": True,
         "profile_updated_at": datetime.utcnow(),
@@ -212,6 +210,7 @@ def predict_existing_user(user_id: str):
     return result
 
 # Psychometric endpoints
+
 @app.post("/save-psychometric")
 def save_psychometric_score(req: PsychometricScoreRequest):
     score = req.psychometric_score
@@ -221,14 +220,8 @@ def save_psychometric_score(req: PsychometricScoreRequest):
     user = users_coll.find_one({"clerk_user_id": req.clerk_user_id})
     now = datetime.utcnow()
     
-    # Check monthly restriction
-    if user and "psychometric_taken_at" in user:
-        last_taken = user["psychometric_taken_at"]
-        days_diff = (now - last_taken).days
-        if days_diff < 30:
-            next_date = (last_taken + timedelta(days=30)).strftime("%Y-%m-%d")
-            raise HTTPException(status_code=400, detail=f"Test can be taken only once per month. Next eligible date: {next_date}")
-    
+    # OPTION 1: Remove all restrictions - users can take test anytime
+    # Simply save the score without any time checks
     users_coll.update_one(
         {"clerk_user_id": req.clerk_user_id},
         {"$set": {"psychometric_score": score, "psychometric_taken_at": now}},
@@ -659,33 +652,33 @@ def mark_specific_notification_read(clerk_user_id: str, notification_id: str = N
     
     return {"message": "Notification(s) marked as read"}
 
-# @app.get("/user/applications/{clerk_user_id}")
-# def get_user_applications_with_notifications(clerk_user_id: str):
-#     """Get user applications with latest notification status"""
-#     try:
-#         applications = list(users_coll.find(
-#             {"clerk_user_id": clerk_user_id},
-#             {
-#                 "_id": 0,
-#                 "created": 1,
-#                 "status": 1,
-#                 "raw": 1,
-#                 "model_output": 1,
-#                 "user_notification": 1,
-#                 "admin_remarks": 1,
-#                 "admin_notes": 1,
-#                 "status_updated_at": 1,
-#                 "status_updated_by": 1
-#             }
-#         ).sort("created", -1).limit(50))
+@app.get("/user/applications/{clerk_user_id}")
+def get_user_applications_with_notifications(clerk_user_id: str):
+    """Get user applications with latest notification status"""
+    try:
+        applications = list(users_coll.find(
+            {"clerk_user_id": clerk_user_id},
+            {
+                "_id": 0,
+                "created": 1,
+                "status": 1,
+                "raw": 1,
+                "model_output": 1,
+                "user_notification": 1,
+                "admin_remarks": 1,
+                "admin_notes": 1,
+                "status_updated_at": 1,
+                "status_updated_by": 1
+            }
+        ).sort("created", -1).limit(50))
         
-#         return {
-#             "applications": applications,
-#             "total_count": len(applications)
-#         }
-#     except Exception as e:
-#         print(f"Error fetching applications: {e}")
-#         return {"applications": [], "total_count": 0, "error": str(e)}
+        return {
+            "applications": applications,
+            "total_count": len(applications)
+        }
+    except Exception as e:
+        print(f"Error fetching applications: {e}")
+        return {"applications": [], "total_count": 0, "error": str(e)}
 
 # Health check
 @app.get("/health")
