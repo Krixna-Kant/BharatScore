@@ -65,6 +65,7 @@ class ProfileRequest(BaseModel):
     gender: str
     state: str
     occupation: str
+    aadhaar_number: str | None = None
 
 class OnboardRequest(BaseModel):
     clerk_user_id: str
@@ -153,6 +154,7 @@ def create_or_update_profile(req: ProfileRequest):
             "gender": req.gender,
             "state": req.state,
             "occupation": req.occupation,
+            "aadhaar_number": req.aadhaar_number,
         },
         "has_profile": True,
         "profile_updated_at": datetime.utcnow(),
@@ -657,33 +659,33 @@ def mark_specific_notification_read(clerk_user_id: str, notification_id: str = N
     
     return {"message": "Notification(s) marked as read"}
 
-@app.get("/user/applications/{clerk_user_id}")
-def get_user_applications_with_notifications(clerk_user_id: str):
-    """Get user applications with latest notification status"""
-    try:
-        applications = list(users_coll.find(
-            {"clerk_user_id": clerk_user_id},
-            {
-                "_id": 0,
-                "created": 1,
-                "status": 1,
-                "raw": 1,
-                "model_output": 1,
-                "user_notification": 1,
-                "admin_remarks": 1,
-                "admin_notes": 1,
-                "status_updated_at": 1,
-                "status_updated_by": 1
-            }
-        ).sort("created", -1).limit(50))
+# @app.get("/user/applications/{clerk_user_id}")
+# def get_user_applications_with_notifications(clerk_user_id: str):
+#     """Get user applications with latest notification status"""
+#     try:
+#         applications = list(users_coll.find(
+#             {"clerk_user_id": clerk_user_id},
+#             {
+#                 "_id": 0,
+#                 "created": 1,
+#                 "status": 1,
+#                 "raw": 1,
+#                 "model_output": 1,
+#                 "user_notification": 1,
+#                 "admin_remarks": 1,
+#                 "admin_notes": 1,
+#                 "status_updated_at": 1,
+#                 "status_updated_by": 1
+#             }
+#         ).sort("created", -1).limit(50))
         
-        return {
-            "applications": applications,
-            "total_count": len(applications)
-        }
-    except Exception as e:
-        print(f"Error fetching applications: {e}")
-        return {"applications": [], "total_count": 0, "error": str(e)}
+#         return {
+#             "applications": applications,
+#             "total_count": len(applications)
+#         }
+#     except Exception as e:
+#         print(f"Error fetching applications: {e}")
+#         return {"applications": [], "total_count": 0, "error": str(e)}
 
 # Health check
 @app.get("/health")

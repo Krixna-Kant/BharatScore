@@ -127,7 +127,7 @@ Write a concise credit risk report including summary, strengths, weaknesses, and
         const prompt = buildGeminiPrompt();
 
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`,
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyCt5_MkrbvNK5ICB6pr-izCn5QhDGgAnzo`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
