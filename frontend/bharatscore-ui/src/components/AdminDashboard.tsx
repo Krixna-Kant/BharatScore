@@ -86,30 +86,45 @@ Write a concise credit risk report including summary, strengths, weaknesses, and
         Generate a professional remark (2-3 sentences) explaining the decision. For approved applications, mention document verification requirement. For rejected applications, mention specific concerns.
       `;
 
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            maxOutputTokens: 200,
-            temperature: 0.7
-          }
-        })
-      });
+      const response = await fetch("http://127.0.0.1:8000/generate-remark", {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify(applicationData), // send full application data
+});
+
+if (!response.ok) throw new Error("Failed to generate remarks");
+
+const data = await response.json();
+const generatedRemark = data.ai_remark || "";
+
+setRemarksInput(generatedRemark);
+
+      // const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`, {
+      //   method: 'POST',
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({
+      //     contents: [{
+      //       parts: [{
+      //         text: prompt
+      //       }]
+      //     }],
+      //     generationConfig: {
+      //       maxOutputTokens: 200,
+      //       temperature: 0.7
+      //     }
+      //   })
+      // });
       
-      if (!response.ok) throw new Error('Failed to generate remarks');
+      // if (!response.ok) throw new Error('Failed to generate remarks');
       
-      const data = await response.json();
-      const generatedRemark = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+      // const data = await response.json();
+      // const generatedRemark = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       
-      setRemarksInput(generatedRemark);
+      // setRemarksInput(generatedRemark);
     } catch (err) {
       console.error('Failed to generate AI remarks:', err);
       setError('Failed to generate AI remarks. Please write manually.');
@@ -126,26 +141,28 @@ Write a concise credit risk report including summary, strengths, weaknesses, and
 
         const prompt = buildGeminiPrompt();
 
-        const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyCt5_MkrbvNK5ICB6pr-izCn5QhDGgAnzo`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-            }),
-          }
-        );
+        const res = await fetch("http://127.0.0.1:8000/generate-remark", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(applicationData.raw), // <-- send raw data from backend
+});
 
-        if (!res.ok) {
-          const text = await res.text();
-          throw new Error(`AI API Error: ${text}`);
-        }
+const data = await res.json();
+const aiText = data.ai_remark || "No report generated";
+setAiReport(aiText);
 
-        const data = await res.json();
-        const aiText = data.candidates?.[0]?.content?.parts?.[0]?.text || "No report generated";
 
-        setAiReport(aiText);
+
+//         if (!res.ok) {
+//           const text = await res.text();
+//           throw new Error(`AI API Error: ${text}`);
+//         }
+
+//         const data = await res.json();
+// const aiText = data.ai_remark || "No report generated";
+
+// setAiReport(aiText);
+
       } catch (e) {
         setError(`Failed to load AI report: ${e}`);
       } finally {
