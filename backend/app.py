@@ -8,6 +8,8 @@ import pymongo
 import joblib
 import pandas as pd
 from urllib.parse import unquote
+import subprocess
+import json
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -19,6 +21,56 @@ from inference_utils import infer_user, pd_to_tier, aggregate_user_scores
 client = pymongo.MongoClient(os.getenv("MONGO_URI"))
 db = client["bharatscore"]
 users_coll = db["users"]
+
+def ollama_generate(prompt: str, model: str = "mistral"):
+    try:
+        result = subprocess.run(
+            ["ollama", "run", model],
+            input=prompt.encode("utf-8"),
+            capture_output=True,
+            check=True
+        )
+        return result.stdout.decode("utf-8").strip()
+    except subprocess.CalledProcessError as e:
+        return f"Error: {e.stderr.decode('utf-8')}"
+
+
+# Load feature explanation KB //Retrerivel Layer
+with open("feature_explanations.json") as f:
+    feature_kb = json.load(f)
+
+def retrieve_explanations(top_shap):
+    explanations = []
+    for f in top_shap:
+        feat = f["feature"]
+        if feat in feature_kb:
+            explanations.append(feature_kb[feat])
+    return explanations
+
+# # Mistral Model
+# from transformers import pipeline
+# import json
+
+# # Load LLM (Mistral)
+# generator = pipeline(
+#     "text-generation",
+#     model="mistralai/Mistral-7B-Instruct-v0.2",
+#     device_map="auto",
+#     torch_dtype="auto"
+# )
+
+# # Load feature explanation KB
+# with open("feature_explanations.json") as f:
+#     feature_kb = json.load(f)
+
+# def retrieve_explanations(top_shap):
+#     explanations = []
+#     for f in top_shap:
+#         feat = f["feature"]
+#         if feat in feature_kb:
+#             explanations.append(feature_kb[feat])
+#     return explanations
+
 
 # Simple inference class
 class SimpleInference:
@@ -141,6 +193,39 @@ def find_application_by_timestamp(clerk_user_id: str, timestamp_str: str):
     
     return None, None
 
+# RAG Remaker Function
+
+def generate_remark(application_data):
+    # Retrieve SHAP feature explanations
+    explanations = retrieve_explanations(application_data.get("top_shap", []))
+    explanations_text = "\n".join([f"- {e}" for e in explanations])
+
+    prompt = f"""
+    You are a loan assessment AI assistant.
+    Based on the following application data and SHAP explanations,
+    generate a professional, concise remark for the loan application.
+
+    Application Details:
+    - Applicant: {application_data.get("name", "Unknown")}
+    - Loan Amount: ₹{application_data.get("loan_amount_requested", "N/A")}
+    - Decision: {application_data.get("decision", "N/A")}
+
+    AI Assessment:
+    - Credit Score: {application_data.get("alt_cibil_score", "N/A")}
+    - Risk Tier: {application_data.get("tier", "N/A")}
+    - Approval Probability: {round((1-application_data.get("pd", 0))*100, 1)}%
+
+    Feature Explanations:
+    {explanations_text}
+
+    Task:
+    Generate a professional remark (2–3 sentences).
+    - For approved applications: mention document verification requirement.
+    - For rejected applications: mention concerns.
+    - For issues: mention review requirements.
+    """
+
+    return ollama_generate(prompt, model="mistral")
 # -------------------- ENDPOINTS --------------------
 
 # Profile endpoints
@@ -679,6 +764,37 @@ def get_user_applications_with_notifications(clerk_user_id: str):
     except Exception as e:
         print(f"Error fetching applications: {e}")
         return {"applications": [], "total_count": 0, "error": str(e)}
+    
+    
+# RAG Endpoint
+# @app.post("/generate-remark")
+# def generate_remark_endpoint(data: InputData):
+#     if inference is None:
+#         raise HTTPException(status_code=500, detail="Model not loaded")
+#     try:
+#         df = pd.DataFrame([data.dict()])
+#         result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+#         remark = generate_remark(result)
+#         result["ai_remark"] = remark
+#         return result
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/generate-remark")
+def generate_remark_endpoint(data: InputData):
+    # Convert incoming JSON to DataFrame
+    df = pd.DataFrame([data.dict()])
+
+    # Run model inference + SHAP explanation
+    result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+
+    # Generate AI remark using Ollama + retrieved explanations
+    remark = generate_remark(result)
+    result["ai_remark"] = remark
+
+    return result
+
+
 
 # Health check
 @app.get("/health")
