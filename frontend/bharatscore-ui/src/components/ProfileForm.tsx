@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useUser } from "@clerk/clerk-react";
 import { useNavigate } from "react-router-dom";
+
+import { CheckCircle } from "lucide-react";
 import AadhaarVerification from "./AdharVerification";
-import { User, Mail, Phone, MapPin, Briefcase, Users, CheckCircle } from "lucide-react";
 
 interface ProfileData {
   name: string;
@@ -36,13 +37,14 @@ const ProfileForm: React.FC = () => {
     dateOfBirth: "",
   });
 
-  const [loading, setLoading] = useState(false);
+  const [utilityBill, setUtilityBill] = useState<File | null>(null);
+  const [salarySlip, setSalarySlip] = useState<File | null>(null);
+
   const [fetching, setFetching] = useState(true);
   const [submitted, setSubmitted] = useState(false);
   const [isValidAadhaar, setIsValidAadhaar] = useState<boolean | null>(null);
   const [aadhaarError, setAadhaarError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
 
   // Indian states list
   const indianStates = [
@@ -96,46 +98,40 @@ const ProfileForm: React.FC = () => {
     fetchProfile();
   }, [user]);
 
-  // Aadhaar validation function
+  // Aadhaar validation function (Verhoeff)
   const validateAadhaar = (aadhaar: string): boolean => {
     const cleanAadhaar = aadhaar.replace(/[\s-]/g, '');
-    
-    if (!/^\d{12}$/.test(cleanAadhaar)) {
-      return false;
-    }
+    if (!/^\d{12}$/.test(cleanAadhaar)) return false;
 
-    // Verhoeff algorithm for Aadhaar validation
     const verhoeffTable = [
-      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-      [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
-      [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
-      [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
-      [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
-      [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
-      [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
-      [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
-      [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
-      [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+      [0,1,2,3,4,5,6,7,8,9],
+      [1,2,3,4,0,6,7,8,9,5],
+      [2,3,4,0,1,7,8,9,5,6],
+      [3,4,0,1,2,8,9,5,6,7],
+      [4,0,1,2,3,9,5,6,7,8],
+      [5,9,8,7,6,0,4,3,2,1],
+      [6,5,9,8,7,1,0,4,3,2],
+      [7,6,5,9,8,2,1,0,4,3],
+      [8,7,6,5,9,3,2,1,0,4],
+      [9,8,7,6,5,4,3,2,1,0]
     ];
 
     const permutationTable = [
-      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-      [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
-      [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
-      [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
-      [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
-      [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
-      [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
-      [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]
+      [0,1,2,3,4,5,6,7,8,9],
+      [1,5,7,6,2,8,3,0,9,4],
+      [5,8,0,3,7,9,6,1,4,2],
+      [8,9,1,6,0,4,3,5,2,7],
+      [9,4,5,3,1,2,6,8,7,0],
+      [4,2,8,6,5,7,3,9,0,1],
+      [2,7,9,3,8,0,6,4,1,5],
+      [7,0,4,6,9,1,3,2,5,8]
     ];
 
     let checksum = 0;
     const reversedDigits = cleanAadhaar.split('').map(Number).reverse();
-
     for (let i = 0; i < reversedDigits.length; i++) {
       checksum = verhoeffTable[checksum][permutationTable[i % 8][reversedDigits[i]]];
     }
-
     return checksum === 0;
   };
 
@@ -154,32 +150,62 @@ const ProfileForm: React.FC = () => {
     setProfile((prev) => ({ ...prev, [name]: value }));
   };
 
+  // ✅ OCR Autofill Aadhaar + Name + Address + Pincode + City + State
   const handleAadhaarExtracted = (extractedAadhaar: string, extractedData?: any) => {
     console.log("Raw OCR extracted Aadhaar:", extractedAadhaar);
     console.log("Extracted data:", extractedData);
-    
+
     const cleanedAadhaar = cleanAadhaarNumber(extractedAadhaar);
-    
+
     if (cleanedAadhaar.length === 12) {
+      let updatedProfile: Partial<ProfileData> = {
+        aadhaarNumber: cleanedAadhaar,
+        name: extractedData?.name || profile.name,
+        address: extractedData?.address || profile.address,
+        pincode: extractedData?.pincode || profile.pincode,
+      };
+
+      if (extractedData?.address) {
+        const addressText = extractedData.address;
+
+        // 🔹 Extract pincode if missing
+        const pincodeMatch = addressText.match(/\b\d{6}\b/);
+        if (pincodeMatch && !updatedProfile.pincode) {
+          updatedProfile.pincode = pincodeMatch[0];
+        }
+
+        // 🔹 Match state from list
+        const foundState = indianStates.find(state =>
+          addressText.toLowerCase().includes(state.toLowerCase())
+        );
+        if (foundState && !profile.state) {
+          updatedProfile.state = foundState;
+        }
+
+        // 🔹 Try to guess city
+        if (!profile.city) {
+          if (foundState) {
+            const beforeState = addressText.split(new RegExp(foundState, "i"))[0].trim();
+            const possibleCity = beforeState.split(",").pop()?.trim();
+            if (possibleCity) updatedProfile.city = possibleCity;
+          } else if (pincodeMatch) {
+            const beforePin = addressText.split(pincodeMatch[0])[0].trim();
+            const possibleCity = beforePin.split(",").pop()?.trim();
+            if (possibleCity) updatedProfile.city = possibleCity;
+          }
+        }
+      }
+
       setProfile((prev) => ({
         ...prev,
-        aadhaarNumber: cleanedAadhaar,
-        // Auto-fill extracted data if available
-        ...(extractedData?.name && !prev.name && { name: extractedData.name }),
-        ...(extractedData?.address && !prev.address && { address: extractedData.address }),
-        ...(extractedData?.pincode && !prev.pincode && { pincode: extractedData.pincode }),
+        ...updatedProfile,
       }));
-      
+
       const isValid = validateAadhaar(cleanedAadhaar);
       setIsValidAadhaar(isValid);
-      
-      if (!isValid) {
-        setAadhaarError("Invalid Aadhaar number. Please verify the extracted number.");
-      } else {
-        setAadhaarError("");
-      }
+      setAadhaarError(isValid ? "" : "Invalid Aadhaar number. Please verify.");
     } else {
-      setAadhaarError(`Incomplete Aadhaar number extracted (${cleanedAadhaar.length} digits). Please try again.`);
+      setAadhaarError(`Incomplete Aadhaar extracted (${cleanedAadhaar.length} digits).`);
       setIsValidAadhaar(false);
     }
   };
@@ -200,39 +226,9 @@ const ProfileForm: React.FC = () => {
     }
   };
 
-  const validateCurrentStep = (): boolean => {
-    if (currentStep === 1) {
-      return !!(profile.name && profile.email && profile.phone && isValidAadhaar);
-    } else if (currentStep === 2) {
-      return !!(profile.address && profile.city && profile.state && profile.pincode);
-    } else if (currentStep === 3) {
-      return !!(profile.occupation && profile.gender);
-    }
-    return false;
-  };
-
-  const nextStep = () => {
-    if (validateCurrentStep() && currentStep < 3) {
-      setCurrentStep(currentStep + 1);
-    }
-  };
-
-  const prevStep = () => {
-    if (currentStep > 1) {
-      setCurrentStep(currentStep - 1);
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!validateCurrentStep()) {
-      setAadhaarError("Please fill in all required fields");
-      return;
-    }
-
     setIsSubmitting(true);
-    
     try {
       const res = await fetch("http://localhost:8000/profile", {
         method: "POST",
@@ -243,17 +239,10 @@ const ProfileForm: React.FC = () => {
           aadhaar_number: profile.aadhaarNumber,
         }),
       });
-
       const data = await res.json();
-      
       if (res.ok) {
-        console.log("Profile stored:", data);
         setSubmitted(true);
-        
-        // Redirect to dashboard after 2 seconds
-        setTimeout(() => {
-          navigate('/dashboard');
-        }, 2000);
+        setTimeout(() => navigate('/dashboard'), 2000);
       } else {
         throw new Error(data.message || "Failed to submit profile");
       }
@@ -307,13 +296,48 @@ const ProfileForm: React.FC = () => {
     </div>
   );
 
-  if (!user) {
-    return <p>Please sign in to complete your profile.</p>;
-  }
+  // Reusable FileUploader component for documents
+  const FileUploader: React.FC<{
+    label: string;
+    onFileSelect: (file: File | null) => void;
+    selectedFile: File | null;
+  }> = ({ label, onFileSelect, selectedFile }) => {
+    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0] || null;
+      onFileSelect(file);
+    };
 
-  if (fetching) {
-    return <p>Loading profile...</p>;
-  }
+    return (
+      <div>
+        <label className="block text-gray-700 text-sm font-semibold mb-2">
+          {label}
+          <span className="text-gray-500 font-normal ml-1 text-xs">(Optional)</span>
+        </label>
+        <div className="flex items-center space-x-2">
+          <input
+            type="file"
+            onChange={handleFileChange}
+            className="block w-full text-sm text-gray-500
+              file:mr-4 file:py-2 file:px-4
+              file:rounded-lg file:border-0
+              file:text-sm file:font-semibold
+              file:bg-orange-50 file:text-orange-700
+              hover:file:bg-orange-100 transition-colors duration-200"
+          />
+          {selectedFile && (
+            <span className="text-sm text-green-600">
+              {selectedFile.name}
+              <CheckCircle className="inline-block w-4 h-4 ml-1" />
+            </span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+
+  if (!user) return <p>Please sign in to complete your profile.</p>;
+  if (fetching) return <p>Loading profile...</p>;
 
   return (
     <div className="max-w-2xl mx-auto bg-white shadow p-6 rounded-lg">
@@ -328,56 +352,23 @@ const ProfileForm: React.FC = () => {
       ) : (
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Aadhaar Verification Section */}
-          <AadhaarVerification onExtract={handleAadhaarExtracted} />
+          <AadhaarVerification onAadhaarExtracted={handleAadhaarExtracted} />
 
           {/* Aadhaar Number Input */}
           <InputField
             label="Aadhaar Number"
             name="aadhaarNumber"
-            value={formatAadhaarDisplay(profile.aadhaarNumber)}
+            value={profile.aadhaarNumber ? formatAadhaarDisplay(profile.aadhaarNumber) : ""}
             onChange={handleAadhaarChange}
             placeholder="1234 5678 9012"
-            readOnly={profile.aadhaarNumber.length === 12}
           />
-          
-          {aadhaarError && (
-            <p className="text-red-500 text-sm mt-1">{aadhaarError}</p>
-          )}
+          {aadhaarError && <p className="text-red-500 text-sm mt-1">{aadhaarError}</p>}
 
           {/* Basic Information */}
-          <InputField
-            label="Full Name"
-            name="name"
-            value={profile.name}
-            onChange={handleChange}
-            placeholder="Enter your full name"
-          />
-
-          <InputField
-            label="Email"
-            name="email"
-            type="email"
-            value={profile.email}
-            onChange={handleChange}
-            placeholder="Enter your email"
-          />
-
-          <InputField
-            label="Phone"
-            name="phone"
-            type="tel"
-            value={profile.phone}
-            onChange={handleChange}
-            placeholder="Enter your phone number"
-          />
-
-          <InputField
-            label="Date of Birth"
-            name="dateOfBirth"
-            type="date"
-            value={profile.dateOfBirth}
-            onChange={handleChange}
-          />
+          <InputField label="Full Name" name="name" value={profile.name} onChange={handleChange} placeholder="Enter your full name" />
+          <InputField label="Email" name="email" type="email" value={profile.email} onChange={handleChange} placeholder="Enter your email" />
+          <InputField label="Phone" name="phone" type="tel" value={profile.phone} onChange={handleChange} placeholder="Enter your phone number" />
+          <InputField label="Date of Birth" name="dateOfBirth" type="date" value={profile.dateOfBirth} onChange={handleChange} />
 
           {/* Address Information */}
           <div>
@@ -391,15 +382,7 @@ const ProfileForm: React.FC = () => {
               className="w-full px-4 py-3 rounded-lg border-2 border-orange-200 focus:border-orange-500 focus:ring focus:ring-orange-200 focus:outline-none transition-colors duration-200"
             />
           </div>
-
-          <InputField
-            label="City"
-            name="city"
-            value={profile.city}
-            onChange={handleChange}
-            placeholder="Enter your city"
-          />
-
+          <InputField label="City" name="city" value={profile.city} onChange={handleChange} placeholder="Enter your city" />
           <SelectField
             label="State"
             name="state"
@@ -410,14 +393,7 @@ const ProfileForm: React.FC = () => {
               ...indianStates.map(state => ({ value: state, label: state }))
             ]}
           />
-
-          <InputField
-            label="PIN Code"
-            name="pincode"
-            value={profile.pincode}
-            onChange={handleChange}
-            placeholder="Enter PIN code"
-          />
+          <InputField label="PIN Code" name="pincode" value={profile.pincode} onChange={handleChange} placeholder="Enter PIN code" />
 
           {/* Personal Information */}
           <SelectField
@@ -432,7 +408,6 @@ const ProfileForm: React.FC = () => {
               { value: "Other", label: "Other" }
             ]}
           />
-
           <SelectField
             label="Occupation"
             name="occupation"
@@ -442,6 +417,19 @@ const ProfileForm: React.FC = () => {
               { value: "", label: "Select Occupation", disabled: true },
               ...occupations.map(occupation => ({ value: occupation, label: occupation }))
             ]}
+          />
+
+          {/* Optional Document Uploads */}
+          <h3 className="text-lg font-semibold mt-8 mb-2">Optional Documents</h3>
+          <FileUploader
+            label="Utility Bill"
+            onFileSelect={setUtilityBill}
+            selectedFile={utilityBill}
+          />
+          <FileUploader
+            label="Salary Slip"
+            onFileSelect={setSalarySlip}
+            selectedFile={salarySlip}
           />
 
           <button
