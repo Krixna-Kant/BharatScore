@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import {
   CheckCircle,
@@ -23,9 +24,9 @@ interface UserData {
 }
 
 interface ModelOutput {
-  final_cibil_score: number;
-  final_tier: string;
-  loan_approval_probability: number;
+  alt_cibil_score: number;
+  tier: string;
+  pd: number;
   monthly_income?: number;
   debt_to_income_ratio?: number;
   employment_stability?: string;
@@ -56,78 +57,57 @@ function CreditRiskDashboard({
   const [remarksInput, setRemarksInput] = useState("");
   const [generatingRemarks, setGeneratingRemarks] = useState(false);
 
-  const buildGeminiPrompt = () => `
-You are a financial analyst AI.
-Here is user data: ${JSON.stringify(userData)}
-Here is model output: ${JSON.stringify(modelOutput)}
+  // Helper function to safely extract credit score
+  const getCreditScore = () => {
+    const score = modelOutput?.alt_cibil_score || applicationData?.model_output?.alt_cibil_score;
+    return score ? Math.round(score).toString() : "N/A";
+  };
 
-Write a concise credit risk report including summary, strengths, weaknesses, and recommendation.
-`;
+  // Helper function to safely extract risk tier
+  const getRiskTier = () => {
+    return modelOutput?.tier || applicationData?.model_output?.tier || "N/A";
+  };
+
+  // Helper function to safely extract approval probability
+  const getApprovalProbability = () => {
+    const pd = modelOutput?.pd || applicationData?.model_output?.pd;
+    if (pd !== null && pd !== undefined && !isNaN(pd)) {
+      const approvalProb = 1 - parseFloat(pd);
+      return `${(approvalProb * 100).toFixed(1)}%`;
+    }
+    return "N/A";
+  };
 
   const generateAIRemarks = async (status) => {
     setGeneratingRemarks(true);
     try {
-      const prompt = `
-        You are a loan assessment AI assistant. Based on the following application data and decision, generate a professional, concise remark for the loan application.
-
-        Application Details:
-        - Applicant: ${userData.name || 'Unknown'}
-        - Loan Amount: ₹${userData.loanRequested || 'N/A'}
-        - Age Group: ${userData.ageGroup || 'N/A'}
-        - Region: ${userData.region || 'N/A'}
-        - Occupation: ${userData.occupation || 'N/A'}
-        - Decision: ${status.toUpperCase()}
-        
-        AI Assessment:
-        - Credit Score: ${modelOutput?.final_cibil_score || 'N/A'}
-        - Risk Tier: ${modelOutput?.final_tier || 'N/A'}
-        - Approval Probability: ${modelOutput?.loan_approval_probability ? (modelOutput.loan_approval_probability * 100).toFixed(1) + '%' : 'N/A'}
-
-        Generate a professional remark (2-3 sentences) explaining the decision. For approved applications, mention document verification requirement. For rejected applications, mention specific concerns.
-      `;
-
       const response = await fetch("http://127.0.0.1:8000/generate-remark", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify(applicationData), // send full application data
-});
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...applicationData.raw,
+          decision_status: status,
+          user_name: userData.name,
+          loan_amount: userData.loanRequested,
+          model_assessment: {
+            credit_score: getCreditScore(),
+            risk_tier: getRiskTier(),
+            approval_probability: getApprovalProbability()
+          }
+        }),
+      });
 
-if (!response.ok) throw new Error("Failed to generate remarks");
+      if (!response.ok) throw new Error("Failed to generate remarks");
 
-const data = await response.json();
-const generatedRemark = data.ai_remark || "";
+      const data = await response.json();
+      const generatedRemark = data.ai_remark || "";
+      setRemarksInput(generatedRemark);
 
-setRemarksInput(generatedRemark);
-
-      // const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=`, {
-      //   method: 'POST',
-      //   headers: {
-      //     'Content-Type': 'application/json',
-      //   },
-      //   body: JSON.stringify({
-      //     contents: [{
-      //       parts: [{
-      //         text: prompt
-      //       }]
-      //     }],
-      //     generationConfig: {
-      //       maxOutputTokens: 200,
-      //       temperature: 0.7
-      //     }
-      //   })
-      // });
-      
-      // if (!response.ok) throw new Error('Failed to generate remarks');
-      
-      // const data = await response.json();
-      // const generatedRemark = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
-      // setRemarksInput(generatedRemark);
     } catch (err) {
       console.error('Failed to generate AI remarks:', err);
-      setError('Failed to generate AI remarks. Please write manually.');
+      setError('Failed to generate AI remarks using Ollama. Please write manually.');
     } finally {
       setGeneratingRemarks(false);
     }
@@ -139,38 +119,45 @@ setRemarksInput(generatedRemark);
         setLoading(true);
         setError("");
 
-        const prompt = buildGeminiPrompt();
+        const response = await fetch("http://127.0.0.1:8000/generate-remark", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...applicationData.raw,
+            analysis_type: "comprehensive_credit_report",
+            user_profile: {
+              name: userData.name,
+              age_group: userData.ageGroup,
+              region: userData.region,
+              occupation: userData.occupation,
+              loan_requested: userData.loanRequested
+            },
+            model_output: modelOutput || applicationData?.model_output
+          }),
+        });
 
-        const res = await fetch("http://127.0.0.1:8000/generate-remark", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(applicationData.raw), // <-- send raw data from backend
-});
+        if (!response.ok) {
+          throw new Error(`Ollama RAG API Error: ${response.status}`);
+        }
 
-const data = await res.json();
-const aiText = data.ai_remark || "No report generated";
-setAiReport(aiText);
-
-
-
-//         if (!res.ok) {
-//           const text = await res.text();
-//           throw new Error(`AI API Error: ${text}`);
-//         }
-
-//         const data = await res.json();
-// const aiText = data.ai_remark || "No report generated";
-
-// setAiReport(aiText);
+        const data = await response.json();
+        const aiText = data.ai_remark || "No report generated from Ollama";
+        setAiReport(aiText);
 
       } catch (e) {
-        setError(`Failed to load AI report: ${e}`);
+        setError(`Failed to load AI report from Ollama: ${e.message}`);
       } finally {
         setLoading(false);
       }
     }
-    fetchAiReport();
-  }, [clerkUserId]);
+    
+    if (applicationData?.raw) {
+      fetchAiReport();
+    } else {
+      setLoading(false);
+      setError("No application data available for analysis");
+    }
+  }, [clerkUserId, applicationData, userData, modelOutput]);
 
   const handleStatusUpdate = (status) => {
     if (updating) return;
@@ -178,17 +165,16 @@ setAiReport(aiText);
     if (remarksInput.trim()) {
       onStatusUpdate(status, remarksInput.trim());
     } else {
-      // Generate default message based on status
       let defaultRemark = "";
       switch (status) {
         case "approved":
-          defaultRemark = "Application approved. Please visit the nearest branch for document verification and loan disbursement.";
+          defaultRemark = "Application approved based on AI assessment. Please visit the nearest branch for document verification and loan disbursement.";
           break;
         case "rejected":
-          defaultRemark = "Application has been rejected based on our assessment criteria.";
+          defaultRemark = "Application rejected based on risk assessment. Contact support for more information.";
           break;
         default:
-          defaultRemark = "Application status updated.";
+          defaultRemark = "Application status updated based on comprehensive analysis.";
       }
       onStatusUpdate(status, defaultRemark);
     }
@@ -199,7 +185,12 @@ setAiReport(aiText);
       <div className="bg-white rounded-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto">
         {/* Modal Header */}
         <div className="flex justify-between items-center p-6 border-b">
-          <h1 className="text-2xl font-bold">Credit Risk Report for {userData.name}</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold">Credit Risk Report for {userData.name}</h1>
+            <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded-full">
+              Ollama RAG Powered
+            </span>
+          </div>
           <button onClick={onClose} className="p-1 hover:bg-gray-100 rounded-full">
             <X size={24} />
           </button>
@@ -210,46 +201,61 @@ setAiReport(aiText);
           {loading ? (
             <div className="flex justify-center items-center py-8">
               <RefreshCw className="animate-spin mr-2" />
-              Loading AI report...
+              <div className="text-center">
+                <p>Loading AI analysis from Ollama...</p>
+                <p className="text-sm text-gray-500 mt-1">Analyzing with RAG system</p>
+              </div>
             </div>
           ) : error ? (
-            <div className="error p-4 bg-red-50 text-red-700 rounded-md">{error}</div>
+            <div className="error p-4 bg-red-50 text-red-700 rounded-md">
+              <div className="font-medium">Ollama RAG Error</div>
+              <div className="text-sm mt-1">{error}</div>
+            </div>
           ) : (
             <>
-              {/* AI Report */}
-              <div className="mb-6 p-4 bg-gray-50 rounded-lg">
-                <h2 className="text-lg font-semibold mb-3 flex items-center">
-                  <TrendingUp className="mr-2" /> AI Analysis
+              {/* AI Report from Ollama RAG */}
+              <div className="mb-6 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+                <h2 className="text-lg font-semibold mb-3 flex items-center text-blue-900">
+                  <TrendingUp className="mr-2" /> 
+                  Ollama RAG Analysis
+                  <span className="ml-2 px-2 py-1 bg-blue-200 text-blue-800 text-xs rounded-full">
+                    AI Powered
+                  </span>
                 </h2>
-                <div className="whitespace-pre-wrap">{aiReport}</div>
+                <div className="whitespace-pre-wrap text-blue-900 leading-relaxed">
+                  {aiReport}
+                </div>
               </div>
 
-              {/* Stats Cards */}
+              {/* Stats Cards - FIXED FOR YOUR MODEL OUTPUT */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
                   <h3 className="font-semibold text-blue-900 mb-1">Credit Score</h3>
                   <p className="text-2xl font-bold text-blue-700">
-                    {modelOutput?.final_cibil_score || "N/A"}
+                    {getCreditScore()}
                   </p>
+                  <p className="text-sm text-blue-600 mt-1">Bharat Score</p>
                 </div>
                 
                 <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
                   <h3 className="font-semibold text-purple-900 mb-1">Risk Tier</h3>
                   <p className="text-xl font-bold text-purple-700">
-                    {modelOutput?.final_tier || "N/A"}
+                    {getRiskTier()}
                   </p>
+                  <p className="text-sm text-purple-600 mt-1">Risk Category</p>
                 </div>
                 
                 <div className="bg-green-50 p-4 rounded-lg border border-green-200">
                   <h3 className="font-semibold text-green-900 mb-1">Approval Probability</h3>
                   <p className="text-2xl font-bold text-green-700">
-                    {modelOutput?.loan_approval_probability ? (modelOutput.loan_approval_probability * 100).toFixed(1) + '%' : 'N/A'}
+                    {getApprovalProbability()}
                   </p>
+                  <p className="text-sm text-green-600 mt-1">Likelihood</p>
                 </div>
               </div>
 
               {/* Additional Financial Data */}
-              {(modelOutput?.monthly_income || modelOutput?.debt_to_income_ratio) && (
+              {(modelOutput?.monthly_income || modelOutput?.debt_to_income_ratio || modelOutput?.employment_stability) && (
                 <div className="bg-gray-50 rounded-lg p-4 mb-6">
                   <h2 className="text-lg font-semibold mb-3">Financial Assessment</h2>
                   <div className="grid grid-cols-2 gap-4">
@@ -320,8 +326,20 @@ setAiReport(aiText);
                     className="w-full p-3 border border-gray-300 rounded-lg resize-none h-24 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                   <div className="flex gap-2 mt-2">
-                   
-                   
+                    <button
+                      onClick={() => generateAIRemarks("approved")}
+                      disabled={generatingRemarks}
+                      className="text-sm text-blue-600 hover:text-blue-800 disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {generatingRemarks ? (
+                        <>
+                          <RefreshCw className="animate-spin" size={12} />
+                          Generating with Ollama...
+                        </>
+                      ) : (
+                        "Generate AI Remark (Ollama)"
+                      )}
+                    </button>
                     <button
                       onClick={() => setRemarksInput("")}
                       className="text-sm text-gray-600 hover:text-gray-800"
@@ -530,71 +548,13 @@ export default function AdminDashboard() {
   const [showCreditRisk, setShowCreditRisk] = useState(false);
   const [creditRiskUser, setCreditRiskUser] = useState<{ user: any, model: any, application: any } | null>(null);
 
-  // Add your Gemini API key here
-  const GEMINI_API_KEY = "";
-
   // Show success message temporarily
   const showSuccessMessage = (message: string) => {
     setSuccessMessage(message);
     setTimeout(() => setSuccessMessage(""), 3000);
   };
 
-  // FIXED: Generate AI remarks using Gemini with better error handling
-  const generateAIRemarks = async (applicationData, status) => {
-    setGeneratingRemarks(true);
-    try {
-      const prompt = `
-        You are a loan assessment AI assistant. Based on the following application data and decision, generate a professional, concise remark for the loan application.
-
-        Application Details:
-        - Applicant: ${applicationData.profile?.name || 'Unknown'}
-        - Loan Amount: ₹${applicationData.raw?.loan_amount_requested || 'N/A'}
-        - Loan Category: ${applicationData.raw?.loan_category || 'N/A'}
-        - Region: ${applicationData.raw?.region || 'N/A'}
-        - User Type: ${applicationData.raw?.user_type || 'N/A'}
-        - Decision: ${status.toUpperCase()}
-        
-        AI Assessment:
-        - Credit Score: ${applicationData.model_output?.final_cibil_score || 'N/A'}
-        - Risk Tier: ${applicationData.model_output?.final_tier || 'N/A'}
-        - Approval Probability: ${applicationData.model_output?.loan_approval_probability ? (applicationData.model_output.loan_approval_probability * 100).toFixed(1) + '%' : 'N/A'}
-
-        Generate a professional remark (2-3 sentences) explaining the decision. For approved applications, mention document verification requirement. For rejected applications, mention specific concerns. For flagged issues, mention what needs review.
-      `;
-
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: prompt
-            }]
-          }],
-          generationConfig: {
-            maxOutputTokens: 200,
-            temperature: 0.7
-          }
-        })
-      });
-      
-      if (!response.ok) throw new Error('Failed to generate remarks');
-      
-      const data = await response.json();
-      const generatedRemark = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      
-      setRemarksInput(generatedRemark);
-    } catch (err) {
-      console.error('Failed to generate AI remarks:', err);
-      setError('Failed to generate AI remarks. Please write manually.');
-    } finally {
-      setGeneratingRemarks(false);
-    }
-  };
-
-  // FIXED: Fetch summary data with better error handling
+  // Fetch summary data with error handling
   const fetchSummary = async () => {
     try {
       setError("");
@@ -626,7 +586,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // FIXED: Fetch detailed application data with error handling
+  // Fetch detailed application data with error handling
   const fetchApplicationDetail = async (clerkUserId) => {
     try {
       setError("");
@@ -644,13 +604,18 @@ export default function AdminDashboard() {
   const openCreditRiskDashboard = (app) => {
     if (!selectedApplication) return;
     
+    console.log("Opening Credit Risk Dashboard with data:", {
+      app_model_output: app.model_output,
+      available_keys: app.model_output ? Object.keys(app.model_output) : []
+    });
+    
     // Extract user data from the application
     const userData = {
       id: selectedApplication.clerk_user_id,
       name: selectedApplication.profile?.name || "Unknown",
       ageGroup: app.raw?.age_group || "N/A",
       region: app.raw?.region || "N/A",
-      occupation: selectedApplication.profile?.occupation || "N/A",
+      occupation: selectedApplication.profile?.occupation || app.raw?.occupation || "N/A",
       loanRequested: app.raw?.loan_amount_requested || 0
     };
     
@@ -662,27 +627,19 @@ export default function AdminDashboard() {
     setShowCreditRisk(true);
   };
 
-  // FIXED: Update application status with proper timestamp encoding
+  // Update application status with proper timestamp encoding
   const updateApplicationStatus = async (clerkUserId, created, newStatus, remarks = "") => {
     setUpdating(true);
     try {
       setError("");
       
-      // Format the created timestamp properly - convert to ISO string if it's a Date object
+      // Format the created timestamp properly
       let createdTimestamp = created;
       if (created instanceof Date) {
         createdTimestamp = created.toISOString();
       } else if (typeof created === 'string') {
-        // Ensure it's properly formatted
         createdTimestamp = created;
       }
-      
-      console.log("Updating application:", {
-        clerkUserId,
-        originalTimestamp: created,
-        formattedTimestamp: createdTimestamp,
-        status: newStatus
-      });
       
       const response = await fetch(`http://localhost:8000/admin/applications/${clerkUserId}/${encodeURIComponent(createdTimestamp)}`, {
         method: "PATCH",
@@ -698,12 +655,10 @@ export default function AdminDashboard() {
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error("Update failed:", errorText);
         throw new Error(`Failed to update status: ${response.status} - ${errorText}`);
       }
 
       const result = await response.json();
-      console.log("Update successful:", result);
       
       // Show success message
       showSuccessMessage(`Application ${newStatus} successfully! User will be notified automatically.`);
@@ -738,7 +693,7 @@ export default function AdminDashboard() {
     );
   };
 
-  // FIXED: Handle status update with remarks
+  // Handle status update with remarks
   const handleStatusUpdate = (clerkUserId, created, newStatus) => {
     if (updating) return; // Prevent double clicks
     

@@ -73,6 +73,16 @@ def retrieve_explanations(top_shap):
 
 
 # Simple inference class
+
+def ensure_consistent_output(result: dict) -> dict:
+    """Ensure credit score, tier, and probability are always available at top-level"""
+    return {
+        **result,  # keep everything else
+        "final_cibil_score": result.get("final_cibil_score") or result.get("alt_cibil_score"),
+        "final_tier": result.get("final_tier") or result.get("tier"),
+        "loan_approval_probability": result.get("loan_approval_probability") or (1 - result.get("pd", 0)),
+    }
+
 class SimpleInference:
     def __init__(self, preprocessor, calibrated_clf):
         self.pre = preprocessor
@@ -235,6 +245,19 @@ def generate_remark(application_data):
 
     return ollama_generate(prompt, model="mistral")
 
+
+
+# -------------------- OUPUT NORMALIZED FUNCION  --------------------
+def normalize_model_output(app):
+    """Extracts credit score, risk tier, and probability consistently from any application doc."""
+    model_output = app.get("model_output", app)  # sometimes it's nested, sometimes top-level
+
+    return {
+        "final_cibil_score": model_output.get("final_cibil_score"),
+        "final_tier": model_output.get("final_tier"),
+        "loan_approval_probability": model_output.get("loan_approval_probability"),
+    }
+
 # -------------------- ENDPOINTS --------------------
 
 # Profile endpoints
@@ -284,6 +307,7 @@ def predict(data: InputData):
     try:
         df = pd.DataFrame([data.dict()])
         result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+        result = ensure_consistent_output(result)
         return result
     except Exception as e:
         import traceback
@@ -364,6 +388,7 @@ def get_user_data(clerk_user_id: str):
 
         df = pd.DataFrame([raw_data])
         result = infer_user(df, inference, explainer, feature_names, top_k_shap=5)
+        result = ensure_consistent_output(result)
 
         # Add extra metadata
         result["loan_amount_requested"] = raw_data.get("loan_amount_requested", 0)
@@ -381,6 +406,7 @@ def get_user_data(clerk_user_id: str):
         "final_cibil_score": aggregated["final_cibil_score"],
         "final_tier": aggregated["final_tier"],
         "loan_count": aggregated["loan_count"],
+        "loan_approval_probability": aggregated.get("loan_approval_probability"),
     }
 
 # Admin endpoints
@@ -458,6 +484,8 @@ def admin_application_detail(clerk_user_id: str):
                 )
             except Exception as e:
                 model_result = {"error": str(e)}
+                
+            model_result = ensure_consistent_output(model_result)
 
         applications.append({
             "raw": raw_data,
@@ -813,3 +841,20 @@ def health_check():
 @app.get("/")
 def root():
     return {"message": "Bharat Score API v2 is running!"}
+
+# Normalize model output endpoint
+# @app.get("/user/normalized/{clerk_user_id}")
+# def get_normalized_user_scores(clerk_user_id: str):
+#     docs = list(users_coll.find({"clerk_user_id": clerk_user_id}))
+#     if not docs:
+#         raise HTTPException(status_code=404, detail="No applications found")
+
+#     normalized_list = [normalize_model_output(app) for app in docs]
+    
+#     # Take last/latest app for summary
+#     latest = normalized_list[0]
+#     return {
+#         "latest": latest,
+#         "all": normalized_list
+#     }
+
