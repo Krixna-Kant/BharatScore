@@ -193,17 +193,15 @@ def find_application_by_timestamp(clerk_user_id: str, timestamp_str: str):
     
     return None, None
 
-# RAG Remaker Function
-
 def generate_remark(application_data):
-    # Retrieve SHAP feature explanations
+    # Retrieve SHAP feature explanations with values
     explanations = retrieve_explanations(application_data.get("top_shap", []))
     explanations_text = "\n".join([f"- {e}" for e in explanations])
 
     prompt = f"""
     You are a loan assessment AI assistant.
-    Based on the following application data and SHAP explanations,
-    generate a professional, concise remark for the loan application.
+    Your task is to generate a professional remark (2–3 sentences) 
+    for a loan application based on the details and SHAP feature explanations. 
 
     Application Details:
     - Applicant: {application_data.get("name", "Unknown")}
@@ -215,17 +213,28 @@ def generate_remark(application_data):
     - Risk Tier: {application_data.get("tier", "N/A")}
     - Approval Probability: {round((1-application_data.get("pd", 0))*100, 1)}%
 
-    Feature Explanations:
+    SHAP Feature Explanations (feature and its impact on decision):
     {explanations_text}
 
-    Task:
-    Generate a professional remark (2–3 sentences).
-    - For approved applications: mention document verification requirement.
-    - For rejected applications: mention concerns.
-    - For issues: mention review requirements.
+    Guidelines for the remark:
+    - Mention the decision (Approved / Rejected / Review).
+    - Highlight 1–2 important SHAP features, including their **impact direction and magnitude** 
+      in simple terms:
+        * SHAP value > 0 → "positively influenced" (improved approval chances).
+        * SHAP value < 0 → "negatively influenced" (raised risk concerns).
+        * Large magnitude → "strongly influenced".
+        * Small magnitude → "minor influence".
+    - Translate SHAP values into easy-to-read phrases like:
+        * "strong positive impact (+0.45)" → "significantly improved approval chances".
+        * "negative impact (-0.30)" → "raised concerns about repayment ability".
+    - For APPROVED: say approval, cite positive SHAP drivers, and mention doc verification.
+    - For REJECTED: cite negative SHAP drivers clearly as concerns.
+    - For REVIEW: cite uncertain/conflicting SHAP drivers and need for further check.
+    - Keep the explanation professional, concise, and easy for a non-technical person to understand.
     """
 
     return ollama_generate(prompt, model="mistral")
+
 # -------------------- ENDPOINTS --------------------
 
 # Profile endpoints
